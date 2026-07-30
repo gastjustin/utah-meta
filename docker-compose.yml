@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: utahmeta-postgres
+    environment:
+      POSTGRES_USER: utahmeta
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-utahmeta_dev_password}
+      POSTGRES_DB: utahmeta
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U utahmeta"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: utahmeta-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  utahmeta-sandbox:
+    build: .
+    container_name: utahmeta-media-sandbox
+    ports:
+      - "4100:4100"
+    environment:
+      - PORT=4100
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://utahmeta:${POSTGRES_PASSWORD:-utahmeta_dev_password}@postgres:5432/utahmeta
+      - REDIS_URL=redis://redis:6379
+      - MEDIA_MOUNT_PATH=/media
+    volumes:
+      # Mount your real media library here. Path inside the container
+      # must match what you pass as mediaPath in POST /play requests.
+      - ${MEDIA_LIBRARY_PATH:-./media}:/media:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Uncomment to enable NVIDIA hardware transcode (requires NVIDIA
+    # Container Toolkit installed on the host):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  redis_data:
