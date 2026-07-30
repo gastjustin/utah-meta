@@ -47,6 +47,39 @@ Build a standalone streaming engine (**"Media Sandbox"**) with these components:
 Start by proposing the architecture and API surface, then implement the
 direct-play detection logic first since it's the highest-leverage piece.
 
+## Jellyfin pain points → UtahMeta solutions
+
+Lessons learned from running Jellyfin that UtahMeta must solve:
+
+| Jellyfin problem | Root cause | UtahMeta solution |
+|---|---|---|
+| Live TV / IPTV freezes | Guide refresh blocks the UI thread; EPG data is massive and synchronous | No live TV in v1; guide data is a separate async service if added later |
+| Guide refresh causes server freezes | Monolithic refresh blocks all requests | UtahMeta uses background workers (prep worker, scan jobs) that never block the request path |
+| Metadata and image errors | Fragile scraping pipeline with no fallback | Best-effort TMDB enrichment that falls back to ffprobe/filename data; never blocks playback |
+| External access complexity | Reverse proxy + SSL + port forwarding required | Edge node agent pulls content via authenticated API; no inbound ports needed on the server |
+| Transcode decisions are wrong | Client capability detection is unreliable | Explicit client capability matrix (`CLIENT_CAPABILITIES`) with per-codec/container/resolution flags |
+| No predictive caching | Everything is transcoded on-demand | Preparation engine pre-transcodes in background; prediction engine pre-caches next episodes to edge nodes |
+| No encryption at rest | Media files are plaintext on disk | Edge node cache uses AES-256-GCM encryption with household-specific keys |
+
+## Encryption at rest (edge node cache)
+
+Edge nodes (home or rented) store cached variants encrypted with
+AES-256-GCM. Each household gets a unique encryption key provisioned by the
+server. The key is never stored on the node in plaintext — it's held in
+memory or in a sealed enclave (TPM) if available.
+
+- **Key provisioning**: Server generates a 256-bit key per HomeNode, stored
+  encrypted in the database (encrypted with a server master key). The key
+  is delivered to the edge node agent over the authenticated API channel.
+- **Encryption**: The edge node agent encrypts each downloaded variant
+  chunk-by-chunk as it writes to disk. The file on disk is
+  indistinguishable from random bytes.
+- **Decryption**: A local playback proxy on the edge node decrypts
+  on-the-fly and serves plaintext to the local player over localhost.
+- **Compromise scenario**: If a node is physically stolen or compromised,
+  the cached files are meaningless without the household key. The server
+  can revoke the key, making all cached content permanently unreadable.
+
 ## Roadmap context
 
 This is **Phase 3 of 8** in the UtahMeta replacement roadmap. Next up:

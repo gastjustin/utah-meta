@@ -336,14 +336,17 @@ in `web/` for hot-reloading via Vite's proxy to the backend on port 4100.
 
 ### Edge node agent
 
-`src/edge-node-agent.ts` pulls the home node manifest and downloads
-prepared variants to a local cache directory:
+`src/edge-node-agent.ts` pulls the home node manifest, downloads prepared
+variants, and **encrypts them at rest** with AES-256-GCM using a
+household-specific key. A local decryption proxy serves plaintext to
+players over localhost only.
 
 ```bash
 UTAHMETA_URL=http://media-server:4100 \
 UTAHMETA_AUTH_SUBJECT=edge-user \
 UTAHMETA_HOME_NODE_ID=<node-id> \
 UTAHMETA_CACHE_DIR=/cache \
+UTAHMETA_PROXY_PORT=4101 \
 UTAHMETA_POLL_INTERVAL_MS=300000 \
 UTAHMETA_MAX_CACHE_SIZE_MB=50000 \
 npx tsx src/edge-node-agent.ts
@@ -352,6 +355,19 @@ npx tsx src/edge-node-agent.ts
 Set `UTAHMETA_POLL_INTERVAL_MS` > 0 to run as a periodic sync daemon.
 `UTAHMETA_MAX_CACHE_SIZE_MB` enables LRU eviction when the cache exceeds
 the limit.
+
+**Encryption at rest**: Each home node gets a unique 256-bit AES key
+generated on creation (`POST /home-nodes`). The key is delivered to the
+edge agent over the authenticated API. Cached files are stored as `.enc`
+files — chunked AES-256-GCM ciphertext with per-chunk IVs and auth tags.
+If a node is compromised, the cached files are meaningless without the key.
+Rotate keys with `POST /home-nodes/:id/rotate-key` (invalidates all
+previously encrypted cache).
+
+**Local playback proxy**: The agent runs an HTTP server on localhost
+(default port 4101) that decrypts on-the-fly. Players connect to
+`http://127.0.0.1:4101/play/<variantId>` — supports HTTP Range requests
+for seeking. No plaintext is ever written to disk.
 
 ## Known gaps / not yet hardened
 

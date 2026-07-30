@@ -347,6 +347,7 @@ model HomeNode {
   name          String
   hardwareClass String   @map("hardware_class")
   cachePath     String   @map("cache_path")
+  encryptionKeyHex String? @map("encryption_key_hex")
   lastHeartbeatAt DateTime? @map("last_heartbeat_at")
 
   @@map("home_node")

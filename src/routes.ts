@@ -17,6 +17,7 @@ import {
   queuePrepJob,
   runPrepJob,
 } from "./preparation-engine";
+import { generateEncryptionKey } from "./encryption";
 import {
   getSession,
   sessionExists,
@@ -334,7 +335,7 @@ router.post("/home-nodes", async (req: Request, res: Response) => {
     });
   }
   const node = await prisma.homeNode.create({
-    data: { name, hardwareClass, cachePath },
+    data: { name, hardwareClass, cachePath, encryptionKeyHex: generateEncryptionKey() },
   });
   res.status(201).json(node);
 });
@@ -360,6 +361,28 @@ router.delete("/home-nodes/:id", async (req: Request, res: Response) => {
     where: { homeNodeId: req.params.id },
   });
   res.status(204).send();
+});
+
+// Provision or rotate the encryption key for a home node.
+// The key is used by the edge node agent to encrypt cached variants at rest.
+router.post("/home-nodes/:id/rotate-key", async (req: Request, res: Response) => {
+  const newKey = generateEncryptionKey();
+  const node = await prisma.homeNode.update({
+    where: { homeNodeId: req.params.id },
+    data: { encryptionKeyHex: newKey },
+  });
+  res.json({ homeNodeId: node.homeNodeId, encryptionKeyHex: newKey });
+});
+
+// Retrieve the encryption key for a home node (used by edge node agent).
+router.get("/home-nodes/:id/key", async (req: Request, res: Response) => {
+  const node = await prisma.homeNode.findUnique({
+    where: { homeNodeId: req.params.id },
+    select: { encryptionKeyHex: true },
+  });
+  if (!node) return res.status(404).json({ error: "Home node not found" });
+  if (!node.encryptionKeyHex) return res.status(404).json({ error: "No encryption key set" });
+  res.json({ encryptionKeyHex: node.encryptionKeyHex });
 });
 
 // Desired pull manifest for a home node: ready variants for items that
