@@ -222,6 +222,70 @@ async function enrichMovie(
       console.error(`[library-scanner] ${kind} download failed for "${meta.title}":`, err);
     }
   }
+
+  // Populate genres: clear old ones then insert fresh from TMDB.
+  if (meta.genres.length > 0) {
+    await prisma.mediaGenre.deleteMany({ where: { mediaItemId } });
+    for (const genreName of meta.genres) {
+      const genre = await prisma.genre.upsert({
+        where: { name: genreName },
+        update: {},
+        create: { name: genreName },
+        select: { genreId: true },
+      });
+      await prisma.mediaGenre.create({
+        data: { mediaItemId, genreId: genre.genreId },
+      });
+    }
+  }
+
+  // Populate cast + directors: clear old credits then insert fresh.
+  if (meta.cast.length > 0 || meta.directors.length > 0) {
+    await prisma.mediaCredit.deleteMany({ where: { mediaItemId } });
+
+    for (const member of meta.cast) {
+      if (!member.name) continue;
+      let person = await prisma.person.findFirst({
+        where: { name: member.name },
+        select: { personId: true },
+      });
+      if (!person) {
+        person = await prisma.person.create({
+          data: { name: member.name, personType: "actor" },
+          select: { personId: true },
+        });
+      }
+      await prisma.mediaCredit.create({
+        data: {
+          mediaItemId,
+          personId: person.personId,
+          creditRole: "actor",
+          billingOrder: null,
+        },
+      });
+    }
+
+    for (const dirName of meta.directors) {
+      let person = await prisma.person.findFirst({
+        where: { name: dirName },
+        select: { personId: true },
+      });
+      if (!person) {
+        person = await prisma.person.create({
+          data: { name: dirName, personType: "director" },
+          select: { personId: true },
+        });
+      }
+      await prisma.mediaCredit.create({
+        data: {
+          mediaItemId,
+          personId: person.personId,
+          creditRole: "director",
+          billingOrder: null,
+        },
+      });
+    }
+  }
 }
 
 // ---------- Metadata enrichment (TV) ----------

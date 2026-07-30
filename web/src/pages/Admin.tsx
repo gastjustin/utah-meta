@@ -8,7 +8,19 @@ import {
   Activity,
   Plus,
   ListChecks,
+  Volume2,
+  Trash2,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
+
+interface AudioPolicy {
+  audioPolicyId: string;
+  name: string;
+  englishOnly: boolean;
+  normalizeAudio: boolean;
+}
 
 interface AdminData {
   health: { status: string };
@@ -26,11 +38,21 @@ export default function Admin() {
   const [hnName, setHnName] = useState("");
   const [hnClass, setHnClass] = useState("");
   const [hnPath, setHnPath] = useState("");
+  const [scanJobs, setScanJobs] = useState<any[]>([]);
+  const [audioPolicies, setAudioPolicies] = useState<AudioPolicy[]>([]);
+  const [showAddPolicy, setShowAddPolicy] = useState(false);
+  const [newPolicyName, setNewPolicyName] = useState("");
+  const [newPolicyEnglish, setNewPolicyEnglish] = useState(false);
+  const [newPolicyNormalize, setNewPolicyNormalize] = useState(true);
+  const [editingPolicy, setEditingPolicy] = useState<string | null>(null);
+  const [editPolicyName, setEditPolicyName] = useState("");
+  const [editPolicyEnglish, setEditPolicyEnglish] = useState(false);
+  const [editPolicyNormalize, setEditPolicyNormalize] = useState(true);
   const [msg, setMsg] = useState("");
 
   async function load() {
     try {
-      const [health, libraries, jobs, nodes, users, sessions, predictions] =
+      const [health, libraries, jobs, nodes, users, sessions, predictions, scans, policies] =
         await Promise.all([
           api("/health").catch(() => ({ status: "down" })),
           api("/libraries").catch(() => []),
@@ -39,6 +61,8 @@ export default function Admin() {
           api("/users").catch(() => []),
           api("/sessions").catch(() => []),
           api("/predictions").catch(() => []),
+          api("/scan-jobs").catch(() => []),
+          api<AudioPolicy[]>("/audio-policies").catch(() => []),
         ]);
       setData({
         health,
@@ -49,6 +73,8 @@ export default function Admin() {
         sessions,
         predictions,
       });
+      setScanJobs(scans);
+      setAudioPolicies(policies);
     } catch {
       // ignore
     }
@@ -195,6 +221,227 @@ export default function Admin() {
           label="Predictions"
           value={String(data.predictions.length)}
         />
+      </div>
+
+      {/* Scan job history */}
+      {scanJobs.length > 0 && (
+        <div className="bg-gray-800 rounded-lg p-5">
+          <h2 className="text-white font-bold mb-3 flex items-center gap-2">
+            <ScanLine className="w-5 h-5 text-blue-400" /> Scan History
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-gray-300">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-700">
+                  <th className="pb-2">Library</th>
+                  <th className="pb-2">Type</th>
+                  <th className="pb-2">Status</th>
+                  <th className="pb-2">Started</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scanJobs.slice(0, 10).map((job: any) => (
+                  <tr key={job.scanJobId} className="border-b border-gray-700/50">
+                    <td className="py-2">{job.library?.name || "Unknown"}</td>
+                    <td className="py-2 text-gray-500 text-xs">{job.scanType}</td>
+                    <td className="py-2">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs ${
+                          job.status === "done"
+                            ? "bg-green-900 text-green-300"
+                            : job.status === "failed"
+                            ? "bg-red-900 text-red-300"
+                            : job.status === "running"
+                            ? "bg-yellow-900 text-yellow-300"
+                            : "bg-gray-700 text-gray-300"
+                        }`}
+                      >
+                        {job.status}
+                      </span>
+                    </td>
+                    <td className="py-2 text-gray-500 text-xs">
+                      {new Date(job.startedAt).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Audio Policies */}
+      <div className="bg-gray-800 rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-white font-bold flex items-center gap-2">
+            <Volume2 className="w-5 h-5 text-blue-400" /> Audio Policies
+          </h2>
+          <button
+            onClick={() => setShowAddPolicy(!showAddPolicy)}
+            className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition"
+          >
+            <Plus className="w-4 h-4" /> Add
+          </button>
+        </div>
+
+        {showAddPolicy && (
+          <div className="bg-gray-700 rounded-lg p-4 mb-4 space-y-3">
+            <input
+              type="text"
+              placeholder="Policy name (e.g. English Only)"
+              value={newPolicyName}
+              onChange={(e) => setNewPolicyName(e.target.value)}
+              className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+            />
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={newPolicyEnglish}
+                  onChange={(e) => setNewPolicyEnglish(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                English only
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={newPolicyNormalize}
+                  onChange={(e) => setNewPolicyNormalize(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                Normalize audio
+              </label>
+            </div>
+            <button
+              onClick={async () => {
+                if (!newPolicyName.trim()) return;
+                try {
+                  await api("/audio-policies", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      name: newPolicyName,
+                      englishOnly: newPolicyEnglish,
+                      normalizeAudio: newPolicyNormalize,
+                    }),
+                  });
+                  setNewPolicyName("");
+                  setNewPolicyEnglish(false);
+                  setNewPolicyNormalize(true);
+                  setShowAddPolicy(false);
+                  load();
+                } catch (err: any) {
+                  setMsg(err.message);
+                }
+              }}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm transition"
+            >
+              Create
+            </button>
+          </div>
+        )}
+
+        {audioPolicies.length === 0 ? (
+          <p className="text-gray-500 text-sm">No audio policies yet. Create one so users can select it in Settings.</p>
+        ) : (
+          <div className="space-y-2">
+            {audioPolicies.map((p) => (
+              <div key={p.audioPolicyId} className="flex items-center gap-3 bg-gray-700 rounded-lg p-3">
+                {editingPolicy === p.audioPolicyId ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editPolicyName}
+                      onChange={(e) => setEditPolicyName(e.target.value)}
+                      className="flex-1 bg-gray-600 text-white border border-gray-500 rounded px-3 py-1.5 text-sm"
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={editPolicyEnglish}
+                        onChange={(e) => setEditPolicyEnglish(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                      EN
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={editPolicyNormalize}
+                        onChange={(e) => setEditPolicyNormalize(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                      Norm
+                    </label>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api(`/audio-policies/${p.audioPolicyId}`, {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                              name: editPolicyName,
+                              englishOnly: editPolicyEnglish,
+                              normalizeAudio: editPolicyNormalize,
+                            }),
+                          });
+                          setEditingPolicy(null);
+                          load();
+                        } catch (err: any) {
+                          setMsg(err.message);
+                        }
+                      }}
+                      className="text-green-400 hover:text-green-300"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setEditingPolicy(null)}
+                      className="text-gray-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-white text-sm font-medium">{p.name}</p>
+                      <p className="text-gray-500 text-xs">
+                        {p.englishOnly ? "English only" : "All languages"}
+                        {` · ${p.normalizeAudio ? "Normalized" : "Raw"}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingPolicy(p.audioPolicyId);
+                        setEditPolicyName(p.name);
+                        setEditPolicyEnglish(p.englishOnly);
+                        setEditPolicyNormalize(p.normalizeAudio);
+                      }}
+                      className="text-gray-400 hover:text-blue-400"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Delete audio policy "${p.name}"?`)) return;
+                        try {
+                          await api(`/audio-policies/${p.audioPolicyId}`, { method: "DELETE" });
+                          load();
+                        } catch (err: any) {
+                          setMsg(err.message);
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Prep jobs table */}

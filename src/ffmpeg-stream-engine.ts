@@ -55,10 +55,20 @@ export function buildFfmpegArgs(
   }
 
   if (decision.action === "TRANSCODE") {
-    // Hardware-accelerated encode if the client supports it and we
-    // decided to keep the codec as hevc; otherwise software h264 encode.
-    if (decision.useHardwareAccel) {
-      args.push("-c:v", "hevc_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23");
+    // Hardware-accelerated encode: try NVENC first, then QSV, then software.
+    // The encoder choice depends on the target codec and available hardware.
+    const hwEncoder = process.env.UTAHMETA_HWACCEL || "auto";
+    const useNvenc = hwEncoder === "auto" || hwEncoder === "nvenc";
+    const useQsv = hwEncoder === "qsv";
+
+    if (decision.useHardwareAccel && useNvenc) {
+      // NVENC: hevc_nvenc for HEVC, h264_nvenc for H.264
+      const encoder = decision.targetVideoCodec === "hevc" ? "hevc_nvenc" : "h264_nvenc";
+      args.push("-c:v", encoder, "-preset", "p4", "-rc", "vbr", "-cq", "23");
+    } else if (useQsv) {
+      // Intel Quick Sync Video
+      const encoder = decision.targetVideoCodec === "hevc" ? "hevc_qsv" : "h264_qsv";
+      args.push("-c:v", encoder, "-preset", "veryfast", "-look_ahead", "0");
     } else {
       args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "21");
     }

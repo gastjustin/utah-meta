@@ -47,6 +47,9 @@ export interface MovieMetadata {
   runtimeMinutes: number | null;
   posterUrlPath: string | null; // TMDB relative path, e.g. "/abc.jpg"
   backdropUrlPath: string | null;
+  genres: string[];
+  cast: { name: string; role: string }[];
+  directors: string[];
 }
 
 export interface SeriesMetadata {
@@ -109,14 +112,35 @@ export async function searchMovie(
     if (matchingYear) hit = matchingYear;
   }
 
-  // A second call gets runtime, which the search endpoint doesn’t return.
+  // A second call gets runtime + genres, which the search endpoint doesn't return.
   let runtimeMinutes: number | null = null;
+  let genres: string[] = [];
   try {
     const detail = await tmdbGet(`/movie/${hit.id}`, {});
     runtimeMinutes =
       typeof detail.runtime === "number" && detail.runtime > 0 ? detail.runtime : null;
+    genres = Array.isArray(detail.genres)
+      ? detail.genres.map((g: any) => g.name).filter(Boolean)
+      : [];
   } catch {
     // Detail lookup is best-effort — search result is still useful without it.
+  }
+
+  // Fetch cast + directors from the credits endpoint.
+  let cast: { name: string; role: string }[] = [];
+  let directors: string[] = [];
+  try {
+    const credits = await tmdbGet(`/movie/${hit.id}/credits`, {});
+    cast = (credits.cast || []).slice(0, 10).map((c: any) => ({
+      name: c.name ?? "",
+      role: c.character ?? "",
+    }));
+    directors = (credits.crew || [])
+      .filter((c: any) => c.job === "Director")
+      .map((c: any) => c.name)
+      .filter(Boolean);
+  } catch {
+    // Best-effort — credits are nice-to-have, not essential.
   }
 
   return {
@@ -127,6 +151,9 @@ export async function searchMovie(
     runtimeMinutes,
     posterUrlPath: hit.poster_path ?? null,
     backdropUrlPath: hit.backdrop_path ?? null,
+    genres,
+    cast,
+    directors,
   };
 }
 

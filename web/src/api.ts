@@ -14,7 +14,7 @@ export function clearToken(): void {
   localStorage.removeItem(USER_KEY);
 }
 
-export function getCurrentUser(): { userId: string; isAdmin: boolean; displayName: string } | null {
+export function getCurrentUser(): { userId: string; authSubject: string; isAdmin: boolean; displayName: string } | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
@@ -67,6 +67,7 @@ export async function login(
   setToken(data.token);
   localStorage.setItem(USER_KEY, JSON.stringify({
     userId: data.user.userId,
+    authSubject: data.user.authSubject,
     isAdmin: data.user.isAdmin,
     displayName: data.user.displayName,
   }));

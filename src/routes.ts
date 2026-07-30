@@ -88,6 +88,17 @@ router.post("/library/scan", async (req: Request, res: Response) => {
   }
 });
 
+// ---------- Scan job history ----------
+
+router.get("/scan-jobs", async (_req: Request, res: Response) => {
+  const jobs = await prisma.scanJob.findMany({
+    orderBy: { startedAt: "desc" },
+    take: 20,
+    include: { library: { select: { name: true } } },
+  });
+  res.json(jobs);
+});
+
 // ---------- Start playback: probe file, decide strategy, create session ----------
 // Body: { deviceId, mediaPath, clientId }
 // The user is taken from the bearer token (req.user).
@@ -189,30 +200,8 @@ router.post("/play", async (req: Request, res: Response) => {
 });
 
 // ---------- Actual media stream ----------
-router.get("/stream/:sessionId", async (req: Request, res: Response) => {
-  const session = await getSession(req.params.sessionId);
-  if (!session) return res.status(404).json({ error: "Session not found" });
-
-  if (!(await isWithinAllowedMediaRoot(session.mediaPath))) {
-    return res.status(400).json({
-      error:
-        "Session mediaPath is no longer under a configured library root " +
-        "or MEDIA_MOUNT_PATH",
-    });
-  }
-
-  try {
-    const media = await probeMediaFile(session.mediaPath);
-    const handler = streamHandler(media, session.decision, session.sessionId, {
-      audioTrackIndex: session.audioTrackIndex,
-      subtitleTrackIndex: session.subtitleTrackIndex,
-    });
-    handler(req, res);
-  } catch (err) {
-    console.error(`Failed to stream session ${session.sessionId}:`, err);
-    res.status(500).end("Stream failed");
-  }
-});
+// Served from index.ts (before requireAuth) so <video> tags can access it.
+// The sessionId acts as a capability token.
 
 // ---------- Session control (pause/resume/seek) ----------
 router.patch("/sessions/:id", async (req: Request, res: Response) => {
@@ -457,4 +446,92 @@ router.get("/download/variant/:variantId", async (req: Request, res: Response) =
       if (!res.headersSent) res.status(500).end();
     }
   });
+});
+
+// ---------- Audio Policies ----------
+// GET /audio-policies — list all audio policies
+
+router.get("/audio-policies", async (_req: Request, res: Response) => {
+  const policies = await prisma.audioPolicy.findMany({
+    orderBy: { name: "asc" },
+  });
+  res.json(policies);
+});
+
+// POST /audio-policies — create a new audio policy
+
+router.post("/audio-policies", async (req: Request, res: Response) => {
+  const { name, englishOnly, normalizeAudio } = req.body as {
+    name: string;
+    englishOnly?: boolean;
+    normalizeAudio?: boolean;
+  };
+  if (!name) {
+    return res.status(400).json({ error: "name is required" });
+  }
+  const policy = await prisma.audioPolicy.create({
+    data: {
+      name,
+      englishOnly: englishOnly ?? false,
+      normalizeAudio: normalizeAudio ?? true,
+    },
+  });
+  res.status(201).json(policy);
+});
+
+// PATCH /audio-policies/:id — update an audio policy
+
+router.patch("/audio-policies/:id", async (req: Request, res: Response) => {
+  const { name, englishOnly, normalizeAudio } = req.body as {
+    name?: string;
+    englishOnly?: boolean;
+    normalizeAudio?: boolean;
+  };
+  const data: Record<string, unknown> = {};
+  if (name !== undefined) data.name = name;
+  if (englishOnly !== undefined) data.englishOnly = englishOnly;
+  if (normalizeAudio !== undefined) data.normalizeAudio = normalizeAudio;
+
+  const policy = await prisma.audioPolicy.update({
+    where: { audioPolicyId: req.params.id },
+    data,
+  });
+  res.json(policy);
+});
+
+// DELETE /audio-policies/:id — delete an audio policy
+
+router.delete("/audio-policies/:id", async (req: Request, res: Response) => {
+  await prisma.audioPolicy.delete({
+    where: { audioPolicyId: req.params.id },
+  });
+  res.status(204).send();
+});
+
+// ---------- Health Snapshots ----------
+// GET /health-snapshots — recent health check results
+
+router.get("/health-snapshots", async (_req: Request, res: Response) => {
+  const snapshots = await prisma.healthSnapshot.findMany({
+    orderBy: { measuredAt: "desc" },
+    take: 50,
+  });
+  res.json(snapshots);
+});
+
+// POST /health-snapshots — record a health check result
+
+router.post("/health-snapshots", async (req: Request, res: Response) => {
+  const { serviceName, nodeRef, status } = req.body as {
+    serviceName: string;
+    nodeRef?: string;
+    status: string;
+  };
+  if (!serviceName || !status) {
+    return res.status(400).json({ error: "serviceName and status are required" });
+  }
+  const snapshot = await prisma.healthSnapshot.create({
+    data: { serviceName, nodeRef, status },
+  });
+  res.status(201).json(snapshot);
 });

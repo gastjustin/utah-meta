@@ -51,9 +51,26 @@ libraryRouter.get("/libraries/:id/series", async (req: Request, res: Response) =
 // ---------- Series detail: seasons + episodes, properly ordered ----------
 
 libraryRouter.get("/series/:id", async (req: Request, res: Response) => {
+  const authSubject = (req.query.userId as string) || req.user?.authSubject;
+
+  let userId: string | undefined;
+  if (authSubject) {
+    const user = await prisma.userProfile.findUnique({
+      where: { authSubject },
+      select: { userId: true },
+    });
+    userId = user?.userId;
+  }
+
   const series = await prisma.series.findUnique({
     where: { seriesId: req.params.id },
-    include: {
+    select: {
+      seriesId: true,
+      title: true,
+      status: true,
+      firstAirYear: true,
+      posterUri: true,
+      backdropUri: true,
       seasons: {
         orderBy: { seasonNumber: "asc" },
         include: {
@@ -64,6 +81,7 @@ libraryRouter.get("/series/:id", async (req: Request, res: Response) => {
               title: true,
               episodeNumber: true,
               runtimeMs: true,
+              artworkAssets: { select: { artworkAssetId: true, kind: true } },
             },
           },
         },
@@ -75,20 +93,42 @@ libraryRouter.get("/series/:id", async (req: Request, res: Response) => {
     return res.status(404).json({ error: "Series not found" });
   }
 
+  // Attach watch state per episode if we have a userId
+  if (userId) {
+    const watchStates = await prisma.watchState.findMany({
+      where: {
+        userId,
+        mediaItemId: { in: series.seasons.flatMap((s: { mediaItems: { mediaItemId: string }[] }) => s.mediaItems.map((m: { mediaItemId: string }) => m.mediaItemId)) },
+      },
+      select: { mediaItemId: true, positionMs: true, completed: true },
+    });
+    const wsMap = new Map(watchStates.map((w: { mediaItemId: string; positionMs: number; completed: boolean }) => [w.mediaItemId, w]));
+    for (const season of series.seasons) {
+      for (const ep of season.mediaItems) {
+        (ep as Record<string, unknown>).watchState = wsMap.get(ep.mediaItemId) || null;
+      }
+    }
+  }
+
   res.json(series);
 });
 
 // ---------- List items in a library ----------
 
 libraryRouter.get("/libraries/:id/items", async (req: Request, res: Response) => {
+  const moviesOnly = req.query.moviesOnly === "true";
   const items = await prisma.mediaItem.findMany({
-    where: { libraryId: req.params.id },
+    where: {
+      libraryId: req.params.id,
+      ...(moviesOnly ? { seasonId: null } : {}),
+    },
     select: {
       mediaItemId: true,
       title: true,
       itemType: true,
       releaseYear: true,
       runtimeMs: true,
+      artworkAssets: { select: { artworkAssetId: true, kind: true } },
     },
     orderBy: { title: "asc" },
   });
@@ -107,6 +147,7 @@ libraryRouter.get("/media/:id", async (req: Request, res: Response) => {
       artworkAssets: true,
       mediaGenres: { include: { genre: true } },
       mediaCredits: { include: { person: true } },
+      season: { include: { series: { select: { seriesId: true, title: true } } } },
     },
   });
 
@@ -138,6 +179,60 @@ libraryRouter.get("/media/:id", async (req: Request, res: Response) => {
   res.json({ ...mediaItem, watchState });
 });
 
+// ---------- Continue Watching ----------
+// GET /continue-watching?userId=<authSubject>
+// Returns in-progress items sorted by last watched, with resume position.
+
+libraryRouter.get("/continue-watching", async (req: Request, res: Response) => {
+  const authSubject = (req.query.userId as string) || req.user?.authSubject;
+  if (!authSubject) return res.json([]);
+
+  const user = await prisma.userProfile.findUnique({
+    where: { authSubject },
+    select: { userId: true },
+  });
+  if (!user) return res.json([]);
+
+  const watchStates = await prisma.watchState.findMany({
+    where: {
+      userId: user.userId,
+      completed: false,
+      positionMs: { gt: 0 },
+    },
+    orderBy: { lastWatchedAt: "desc" },
+    take: 20,
+    include: {
+      mediaItem: {
+        select: {
+          mediaItemId: true,
+          title: true,
+          itemType: true,
+          releaseYear: true,
+          runtimeMs: true,
+          episodeNumber: true,
+          season: { select: { seasonNumber: true, series: { select: { title: true } } } },
+        },
+      },
+    },
+  });
+
+  res.json(
+    watchStates.map((ws: { mediaItemId: string; positionMs: number; completed: boolean; lastWatchedAt: Date; mediaItem: { mediaItemId: string; title: string; itemType: string; releaseYear: number | null; runtimeMs: number | null; episodeNumber: number | null; season: { seasonNumber: number; series: { title: string } } | null } }) => ({
+      mediaItemId: ws.mediaItem.mediaItemId,
+      title: ws.mediaItem.title,
+      itemType: ws.mediaItem.itemType,
+      releaseYear: ws.mediaItem.releaseYear,
+      runtimeMs: ws.mediaItem.runtimeMs,
+      episodeNumber: ws.mediaItem.episodeNumber,
+      seasonNumber: ws.mediaItem.season?.seasonNumber,
+      seriesTitle: ws.mediaItem.season?.series?.title,
+      positionMs: ws.positionMs,
+      completed: ws.completed,
+      lastWatchedAt: ws.lastWatchedAt,
+    }))
+  );
+});
+
 // ---------- Ready variants for a media item ----------
 // GET /media/:id/variants
 
@@ -160,6 +255,104 @@ libraryRouter.get("/media/:id/variants", async (req: Request, res: Response) => 
   res.json(variants);
 });
 
+// ---------- Collections ----------
+// GET /collections — list all collections
+
+libraryRouter.get("/collections", async (_req: Request, res: Response) => {
+  const collections = await prisma.collection.findMany({
+    select: {
+      collectionId: true,
+      name: true,
+      collectionType: true,
+      _count: { select: { items: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+  res.json(collections);
+});
+
+// POST /collections — create a new collection
+
+libraryRouter.post("/collections", async (req: Request, res: Response) => {
+  const { name, collectionType } = req.body as {
+    name: string;
+    collectionType: string;
+  };
+  if (!name || !collectionType) {
+    return res.status(400).json({ error: "name and collectionType are required" });
+  }
+  const collection = await prisma.collection.create({
+    data: { name, collectionType },
+  });
+  res.status(201).json(collection);
+});
+
+// GET /collections/:id — get collection with items
+
+libraryRouter.get("/collections/:id", async (req: Request, res: Response) => {
+  const collection = await prisma.collection.findUnique({
+    where: { collectionId: req.params.id },
+    include: {
+      items: {
+        orderBy: { sortOrder: "asc" },
+        include: {
+          mediaItem: {
+            select: {
+              mediaItemId: true,
+              title: true,
+              itemType: true,
+              releaseYear: true,
+              runtimeMs: true,
+              artworkAssets: { select: { artworkAssetId: true, kind: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!collection) return res.status(404).json({ error: "Collection not found" });
+  res.json(collection);
+});
+
+// POST /collections/:id/items — add item to collection
+
+libraryRouter.post("/collections/:id/items", async (req: Request, res: Response) => {
+  const { mediaItemId } = req.body as { mediaItemId: string };
+  if (!mediaItemId) {
+    return res.status(400).json({ error: "mediaItemId is required" });
+  }
+  const maxOrder = await prisma.collectionItem.aggregate({
+    where: { collectionId: req.params.id },
+    _max: { sortOrder: true },
+  });
+  const item = await prisma.collectionItem.create({
+    data: {
+      collectionId: req.params.id,
+      mediaItemId,
+      sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
+    },
+  });
+  res.status(201).json(item);
+});
+
+// DELETE /collections/:id/items/:itemId — remove item from collection
+
+libraryRouter.delete("/collections/:id/items/:itemId", async (req: Request, res: Response) => {
+  await prisma.collectionItem.delete({
+    where: { collectionItemId: req.params.itemId },
+  });
+  res.status(204).send();
+});
+
+// DELETE /collections/:id — delete entire collection
+
+libraryRouter.delete("/collections/:id", async (req: Request, res: Response) => {
+  await prisma.collection.delete({
+    where: { collectionId: req.params.id },
+  });
+  res.status(204).send();
+});
+
 // ---------- Search ----------
 // GET /search?q=dune
 
@@ -169,19 +362,37 @@ libraryRouter.get("/search", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Query param 'q' is required" });
   }
 
-  const results = await prisma.mediaItem.findMany({
-    where: {
-      title: { contains: q, mode: "insensitive" },
-    },
-    select: {
-      mediaItemId: true,
-      title: true,
-      itemType: true,
-      releaseYear: true,
-    },
-    take: 25,
-    orderBy: { title: "asc" },
-  });
+  const [items, series] = await Promise.all([
+    prisma.mediaItem.findMany({
+      where: {
+        title: { contains: q, mode: "insensitive" },
+      },
+      select: {
+        mediaItemId: true,
+        title: true,
+        itemType: true,
+        releaseYear: true,
+        runtimeMs: true,
+        seasonId: true,
+        episodeNumber: true,
+      },
+      take: 25,
+      orderBy: { title: "asc" },
+    }),
+    prisma.series.findMany({
+      where: {
+        title: { contains: q, mode: "insensitive" },
+      },
+      select: {
+        seriesId: true,
+        title: true,
+        status: true,
+        _count: { select: { seasons: true } },
+      },
+      take: 10,
+      orderBy: { sortTitle: "asc" },
+    }),
+  ]);
 
-  res.json(results);
+  res.json({ items, series });
 });

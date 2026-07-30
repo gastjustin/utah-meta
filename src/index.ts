@@ -3,9 +3,17 @@
  * Entry point
  */
 
+// Prisma returns BigInt for BigInt columns (sizeBytes, capacityBytes).
+// Express res.json() calls JSON.stringify which can't handle BigInt by
+// default — add a toJSON shim so it serializes as a plain number.
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
+  return Number(this);
+};
+
 import express from "express";
 import { createServer } from "http";
 import { join } from "path";
+import { createReadStream, existsSync } from "fs";
 import { loadConfig } from "./config";
 import { attachSessionWebSocket } from "./session-store";
 import { router } from "./routes";
@@ -13,6 +21,10 @@ import { libraryRouter } from "./library-routes";
 import { userRouter } from "./user-routes";
 import { startPrepWorker } from "./preparation-engine";
 import { authRouter, requireAuth, requireAdmin } from "./auth";
+import { prisma } from "./db";
+import { getSession } from "./session-store";
+import { probeMediaFile } from "./ffprobe-integration";
+import { streamHandler } from "./ffmpeg-stream-engine";
 
 // Fail fast on misconfiguration rather than surfacing a cryptic
 // connection error later inside a request handler.
@@ -27,8 +39,40 @@ app.use(express.static(join(__dirname, "..", "public")));
 app.use("/auth", authRouter);
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
+// Public artwork serving — must be before requireAuth so <img> tags work.
+app.get("/artwork/:id", async (req, res) => {
+  const artwork = await prisma.artworkAsset.findUnique({
+    where: { artworkAssetId: req.params.id },
+  });
+  if (!artwork) return res.status(404).end();
+  const path = artwork.storageUri;
+  if (!path || !existsSync(path)) return res.status(404).end();
+  const ext = path.split(".").pop()?.toLowerCase() || "jpg";
+  res.setHeader("Content-Type", ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  createReadStream(path).pipe(res);
+});
+
+// Public stream endpoint — must be before requireAuth so <video> tags work.
+// The sessionId acts as a capability token.
+app.get("/stream/:sessionId", async (req, res) => {
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).end();
+  try {
+    const media = await probeMediaFile(session.mediaPath);
+    const handler = streamHandler(media, session.decision, session.sessionId, {
+      audioTrackIndex: session.audioTrackIndex,
+      subtitleTrackIndex: session.subtitleTrackIndex,
+    });
+    handler(req, res);
+  } catch (err) {
+    console.error(`Failed to stream session ${session.sessionId}:`, err);
+    res.status(500).end("Stream failed");
+  }
+});
+
 // SPA fallback: any non-API GET returns index.html so React Router handles it.
-app.get(/^(?!\/(auth|health|libraries|series|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library)).*/, (_req, res) => {
+app.get(/^(?!\/(auth|health|libraries|series|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|continue-watching|audio-policies|health-snapshots|collections|scan-jobs)).*/, (_req, res) => {
   res.sendFile(join(__dirname, "..", "public", "dist", "index.html"), (err) => {
     if (err) res.sendFile(join(__dirname, "..", "public", "index.html"));
   });
@@ -45,6 +89,9 @@ app.use("/home-nodes", requireAdmin);
 app.use("/predictions", requireAdmin);
 app.post("/users", requireAdmin);
 app.delete("/users/:id", requireAdmin);
+app.post("/audio-policies", requireAdmin);
+app.patch("/audio-policies/:id", requireAdmin);
+app.delete("/audio-policies/:id", requireAdmin);
 
 app.use(router);
 app.use(libraryRouter);
