@@ -17,19 +17,32 @@ import { createReadStream, statSync } from "fs";
 import type { Request, Response } from "express";
 import type { PlaybackDecision } from "./direct-play-engine";
 import type { MediaProfile } from "./direct-play-engine";
-import { updateSessionState, removeSession } from "./session-store";
+import { getSession, updateSessionState, removeSession } from "./session-store";
+import { predictAndStage } from "./prediction-engine";
 
 // ---------- 1. Build ffmpeg args from a decision ----------
 
+export interface StreamOptions {
+  audioTrackIndex?: number;   // ffprobe stream index for the desired audio track
+  subtitleTrackIndex?: number | "off";  // ffprobe stream index, or "off" to burn none
+}
+
 export function buildFfmpegArgs(
   media: MediaProfile,
-  decision: PlaybackDecision
+  decision: PlaybackDecision,
+  output: string = "pipe:1",
+  options?: StreamOptions
 ): string[] {
   if (decision.action === "DIRECT_PLAY") {
     throw new Error("DIRECT_PLAY should not go through ffmpeg — stream the file directly");
   }
 
   const args: string[] = ["-i", media.path];
+
+  // Audio track selection: map only the requested stream.
+  if (options?.audioTrackIndex !== undefined) {
+    args.push("-map", "0:v:0", `-map`, `0:${options.audioTrackIndex}`);
+  }
 
   if (decision.action === "REMUX") {
     // No re-encode — just repackage into the target container.
@@ -57,8 +70,18 @@ export function buildFfmpegArgs(
     );
   }
 
-  // Output to stdout so we can pipe it straight into the HTTP response
-  args.push("pipe:1");
+  // Subtitle handling: burn in the selected subtitle track for transcode.
+  // For remux, subtitles are passed through if the target container supports them.
+  if (options?.subtitleTrackIndex && options.subtitleTrackIndex !== "off") {
+    if (decision.action === "TRANSCODE") {
+      args.push(`-filter:s:${options.subtitleTrackIndex}`, "scale=2.0");
+    }
+  } else if (options?.subtitleTrackIndex === "off") {
+    args.push("-sn");
+  }
+
+  // Output to stdout for streaming, or to a file path for background prep.
+  args.push(output);
 
   return args;
 }
@@ -91,7 +114,8 @@ export function killStreamProcess(sessionId: string): void {
 export function streamHandler(
   media: MediaProfile,
   decision: PlaybackDecision,
-  sessionId: string
+  sessionId: string,
+  options?: StreamOptions
 ) {
   return (req: Request, res: Response) => {
     if (decision.action === "DIRECT_PLAY") {
@@ -105,6 +129,21 @@ export function streamHandler(
         console.error(`Failed to update session ${sessionId} to playing:`, err)
       );
       req.on("close", () => {
+        getSession(sessionId)
+          .then((session) => {
+            if (session?.mediaItemId && session?.clientType) {
+              predictAndStage(
+                session.userId,
+                session.mediaItemId,
+                session.clientType
+              ).catch((err) =>
+                console.error(`[prediction] failed for session ${sessionId}:`, err)
+              );
+            }
+          })
+          .catch((err) =>
+            console.error(`[prediction] getSession failed for session ${sessionId}:`, err)
+          );
         removeSession(sessionId).catch((err) =>
           console.error(`Failed to remove session ${sessionId}:`, err)
         );
@@ -112,7 +151,7 @@ export function streamHandler(
       return streamDirectPlay(media.path, req, res);
     }
 
-    const args = buildFfmpegArgs(media, decision);
+    const args = buildFfmpegArgs(media, decision, "pipe:1", options);
     const ffmpeg = spawn("ffmpeg", args);
     activeProcesses.set(sessionId, ffmpeg);
 
@@ -147,7 +186,7 @@ export function streamHandler(
       if (!res.headersSent) res.status(500).end("Transcode failed to start");
     });
 
-    ffmpeg.on("close", (code) => {
+    ffmpeg.on("close", async (code) => {
       activeProcesses.delete(sessionId);
       if (code !== 0 && code !== null) {
         console.warn(`ffmpeg exited with code ${code} for session ${sessionId}`);
@@ -157,6 +196,18 @@ export function streamHandler(
       // This is also the exact trigger point for Phase 6's predictive
       // cache: "this session just ended cleanly" -> pre-cache next episode.
       if (hasEmittedOutput || code === 0) {
+        try {
+          const session = await getSession(sessionId);
+          if (session?.mediaItemId && session?.clientType) {
+            await predictAndStage(
+              session.userId,
+              session.mediaItemId,
+              session.clientType
+            );
+          }
+        } catch (err) {
+          console.error(`[prediction] failed for session ${sessionId}:`, err);
+        }
         removeSession(sessionId).catch((e) =>
           console.error(`Failed to remove session ${sessionId}:`, e)
         );

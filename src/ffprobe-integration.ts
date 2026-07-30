@@ -7,11 +7,12 @@
  */
 
 import { execa } from "execa";
-import type { MediaProfile } from "./direct-play-engine";
+import type { MediaProfile, TrackInfo } from "./direct-play-engine";
 
 // ---------- 1. Raw ffprobe output shape (subset we care about) ----------
 
 interface FfprobeStream {
+  index: number;
   codec_type: "video" | "audio" | "subtitle" | "data";
   codec_name: string;
   width?: number;
@@ -19,6 +20,13 @@ interface FfprobeStream {
   color_transfer?: string; // e.g. "smpte2084" indicates HDR (PQ)
   color_primaries?: string; // e.g. "bt2020"
   bit_rate?: string;
+  tags?: {
+    language?: string;
+    title?: string;
+  };
+  disposition?: {
+    default?: number;
+  };
 }
 
 interface FfprobeFormat {
@@ -46,7 +54,9 @@ export async function probeMediaFile(filePath: string): Promise<MediaProfile> {
   const data: FfprobeOutput = JSON.parse(stdout);
 
   const videoStream = data.streams.find((s) => s.codec_type === "video");
-  const audioStream = data.streams.find((s) => s.codec_type === "audio");
+  const audioStreams = data.streams.filter((s) => s.codec_type === "audio");
+  const subtitleStreams = data.streams.filter((s) => s.codec_type === "subtitle");
+  const audioStream = audioStreams[0];
 
   if (!videoStream) {
     throw new Error(`No video stream found in ${filePath}`);
@@ -68,6 +78,28 @@ export async function probeMediaFile(filePath: string): Promise<MediaProfile> {
   const resolution: "1080p" | "4k" =
     (videoStream.width ?? 0) >= 3800 ? "4k" : "1080p";
 
+  // format.duration is a float string of seconds (e.g. "8100.123"). Fall
+  // back to 0 when ffprobe can't determine it (some streaming containers).
+  const durationSeconds = Math.round(Number(data.format.duration ?? 0));
+
+  const audioTracks: TrackInfo[] = audioStreams.map((s) => ({
+    index: s.index,
+    codecType: "audio",
+    codec: normalizeCodec(s.codec_name),
+    language: s.tags?.language,
+    title: s.tags?.title,
+    isDefault: s.disposition?.default === 1,
+  }));
+
+  const subtitleTracks: TrackInfo[] = subtitleStreams.map((s) => ({
+    index: s.index,
+    codecType: "subtitle",
+    codec: normalizeCodec(s.codec_name),
+    language: s.tags?.language,
+    title: s.tags?.title,
+    isDefault: s.disposition?.default === 1,
+  }));
+
   return {
     path: filePath,
     container,
@@ -76,6 +108,9 @@ export async function probeMediaFile(filePath: string): Promise<MediaProfile> {
     bitrateMbps,
     isHDR,
     resolution,
+    durationSeconds,
+    audioTracks,
+    subtitleTracks,
   };
 }
 

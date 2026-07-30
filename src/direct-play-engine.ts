@@ -20,6 +20,7 @@ export interface ClientCapability {
   supportsHDR: boolean;
   supportsHevcHardware: boolean; // hardware decode for HEVC
   maxResolution: "1080p" | "4k";
+  supportsSubtitles: boolean;   // client can render embedded subtitle streams
 }
 
 export const CLIENT_CAPABILITIES: Record<string, ClientCapability> = {
@@ -32,6 +33,7 @@ export const CLIENT_CAPABILITIES: Record<string, ClientCapability> = {
     supportsHDR: false,
     supportsHevcHardware: false,
     maxResolution: "1080p",
+    supportsSubtitles: true,
   },
   android_tv: {
     clientId: "android_tv",
@@ -42,6 +44,7 @@ export const CLIENT_CAPABILITIES: Record<string, ClientCapability> = {
     supportsHDR: true,
     supportsHevcHardware: true,
     maxResolution: "4k",
+    supportsSubtitles: true,
   },
   ios: {
     clientId: "ios",
@@ -52,10 +55,86 @@ export const CLIENT_CAPABILITIES: Record<string, ClientCapability> = {
     supportsHDR: true,
     supportsHevcHardware: true,
     maxResolution: "4k",
+    supportsSubtitles: true,
+  },
+  web_firefox: {
+    clientId: "web_firefox",
+    containers: ["mp4", "webm"],
+    videoCodecs: ["h264", "vp9", "av1"],
+    audioCodecs: ["aac", "opus", "vorbis"],
+    maxVideoBitrateMbps: 20,
+    supportsHDR: false,
+    supportsHevcHardware: false,
+    maxResolution: "1080p",
+    supportsSubtitles: true,
+  },
+  web_safari: {
+    clientId: "web_safari",
+    containers: ["mp4"],
+    videoCodecs: ["h264", "hevc"],
+    audioCodecs: ["aac", "ac3"],
+    maxVideoBitrateMbps: 30,
+    supportsHDR: true,
+    supportsHevcHardware: true,
+    maxResolution: "4k",
+    supportsSubtitles: true,
+  },
+  android_mobile: {
+    clientId: "android_mobile",
+    containers: ["mp4", "mkv"],
+    videoCodecs: ["h264", "hevc", "vp9"],
+    audioCodecs: ["aac", "ac3", "eac3"],
+    maxVideoBitrateMbps: 25,
+    supportsHDR: true,
+    supportsHevcHardware: true,
+    maxResolution: "1080p",
+    supportsSubtitles: true,
+  },
+  apple_tv: {
+    clientId: "apple_tv",
+    containers: ["mp4", "mkv"],
+    videoCodecs: ["h264", "hevc"],
+    audioCodecs: ["aac", "ac3", "eac3", "truehd"],
+    maxVideoBitrateMbps: 60,
+    supportsHDR: true,
+    supportsHevcHardware: true,
+    maxResolution: "4k",
+    supportsSubtitles: true,
+  },
+  roku: {
+    clientId: "roku",
+    containers: ["mp4", "mkv"],
+    videoCodecs: ["h264", "hevc"],
+    audioCodecs: ["aac", "ac3", "eac3"],
+    maxVideoBitrateMbps: 40,
+    supportsHDR: true,
+    supportsHevcHardware: true,
+    maxResolution: "4k",
+    supportsSubtitles: true,
+  },
+  lg_webos: {
+    clientId: "lg_webos",
+    containers: ["mp4", "mkv"],
+    videoCodecs: ["h264", "hevc"],
+    audioCodecs: ["aac", "ac3", "eac3"],
+    maxVideoBitrateMbps: 40,
+    supportsHDR: true,
+    supportsHevcHardware: true,
+    maxResolution: "4k",
+    supportsSubtitles: true,
   },
 };
 
 // ---------- 2. Media File Profile ----------
+
+export interface TrackInfo {
+  index: number;
+  codecType: "audio" | "subtitle";
+  codec: string;
+  language?: string;
+  title?: string;
+  isDefault: boolean;
+}
 
 export interface MediaProfile {
   path: string;
@@ -65,6 +144,9 @@ export interface MediaProfile {
   bitrateMbps: number;
   isHDR: boolean;
   resolution: "1080p" | "4k";
+  durationSeconds: number; // 0 if ffprobe couldn't determine it
+  audioTracks: TrackInfo[];
+  subtitleTracks: TrackInfo[];
 }
 
 // ---------- 3. Decision Types ----------

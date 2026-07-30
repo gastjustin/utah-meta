@@ -42,10 +42,19 @@ services:
       - DATABASE_URL=postgresql://utahmeta:${POSTGRES_PASSWORD:-utahmeta_dev_password}@postgres:5432/utahmeta
       - REDIS_URL=redis://redis:6379
       - MEDIA_MOUNT_PATH=/media
+      # Optional metadata enrichment (Phase 4). Leave TMDB_API_KEY unset to
+      # index from filenames only, with no artwork downloads.
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - ARTWORK_PATH=/app/artwork
+      - PREPARED_MEDIA_PATH=/app/prepared
     volumes:
       # Mount your real media library here. Path inside the container
       # must match what you pass as mediaPath in POST /play requests.
       - ${MEDIA_LIBRARY_PATH:-./media}:/media:ro
+      # Persist downloaded posters/backdrops and pre-transcoded copies
+      # across container restarts.
+      - artwork_data:/app/artwork
+      - prepared_data:/app/prepared
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,3 +74,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  artwork_data:
+  prepared_data:

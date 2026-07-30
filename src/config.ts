@@ -13,6 +13,9 @@ export interface UtahMetaConfig {
   redisUrl: string;
   mediaMountPath: string | null;
   nodeEnv: "development" | "production" | "test";
+  metadataEnabled: boolean; // true when TMDB_API_KEY is set
+  artworkPath: string;
+  preparedMediaPath: string;
 }
 
 function requireEnv(name: string): string {
@@ -48,5 +51,27 @@ export function loadConfig(): UtahMetaConfig {
 
   const nodeEnv = (process.env.NODE_ENV as UtahMetaConfig["nodeEnv"]) ?? "development";
 
-  return { port, databaseUrl, redisUrl, mediaMountPath, nodeEnv };
+  // Metadata enrichment is optional — the scanner falls back to ffprobe +
+  // filename parsing when no TMDB key is present. Warn so it's not a
+  // silent "why are there no posters?" surprise.
+  const metadataEnabled = Boolean(process.env.TMDB_API_KEY);
+  const artworkPath = process.env.ARTWORK_PATH ?? "./artwork";
+  const preparedMediaPath = process.env.PREPARED_MEDIA_PATH ?? "./prepared";
+  if (!metadataEnabled) {
+    console.warn(
+      "[config] TMDB_API_KEY is not set — library scans will index titles " +
+        "from filenames only, with no metadata lookups or artwork downloads."
+    );
+  }
+
+  return {
+    port,
+    databaseUrl,
+    redisUrl,
+    mediaMountPath,
+    nodeEnv,
+    metadataEnabled,
+    artworkPath,
+    preparedMediaPath,
+  };
 }

@@ -1,4 +1,4 @@
-# ---------- Build stage ----------
+# ---------- Backend build stage ----------
 FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
@@ -8,6 +8,15 @@ COPY tsconfig.json ./
 COPY prisma ./prisma
 RUN npx prisma generate
 COPY src ./src
+RUN npm run build
+
+# ---------- Web UI build stage ----------
+FROM node:20-bookworm-slim AS web-build
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
 RUN npm run build
 
 # ---------- Runtime stage ----------
@@ -29,6 +38,8 @@ RUN npm install --omit=dev
 COPY prisma ./prisma
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
+COPY --from=web-build /public/dist ./public/dist
+COPY public ./public
 
 EXPOSE 4100
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

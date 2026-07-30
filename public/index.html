@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UtahMeta</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-active { @apply border-b-2 border-blue-500 text-blue-600; }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen">
+  <div id="login-panel" class="hidden max-w-md mx-auto p-4 mt-20">
+    <div class="bg-white p-6 rounded shadow">
+      <h1 class="text-2xl font-bold mb-4">UtahMeta</h1>
+      <p class="text-sm text-gray-500 mb-4">Sign in with an external user id.</p>
+      <input id="login-subject" type="text" class="w-full border rounded p-2 mb-2" placeholder="user id (e.g. justin)" />
+      <input id="login-name" type="text" class="w-full border rounded p-2 mb-4" placeholder="display name (optional)" />
+      <button class="w-full bg-blue-600 text-white px-4 py-2 rounded" onclick="login()">Sign in</button>
+    </div>
+  </div>
+
+  <div id="main-panel" class="hidden">
+    <div class="max-w-6xl mx-auto p-4">
+      <header class="mb-6">
+        <h1 class="text-3xl font-bold">UtahMeta</h1>
+        <p class="text-sm text-gray-500">Admin, library, and playback</p>
+      </header>
+
+      <nav class="flex gap-6 border-b mb-6">
+        <button id="nav-library" class="tab tab-active px-2 py-2 font-medium" data-tab="library">Library</button>
+        <button id="nav-admin" class="tab px-2 py-2 font-medium" data-tab="admin">Admin</button>
+        <button id="nav-player" class="tab px-2 py-2 font-medium" data-tab="player">Player</button>
+      </nav>
+
+      <main id="app"></main>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    const app = document.getElementById('app');
+    let token = localStorage.getItem('utahmeta_token') || '';
+    const state = {
+      tab: 'library',
+      libraries: [],
+      items: [],
+      series: null,
+      mediaDetail: null,
+      session: null,
+      message: '',
+      adminData: {}
+    };
+
+    function setTab(tab) {
+      state.tab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('tab-active'));
+      document.getElementById(`nav-${tab}`).classList.add('tab-active');
+      render();
+      if (tab === 'admin') loadAdmin();
+      if (tab === 'library') loadLibraries();
+    }
+
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => setTab(btn.dataset.tab));
+    });
+
+    async function api(path, opts) {
+      const headers = { ...((opts || {}).headers || {}) };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(API + path, { ...(opts || {}), headers });
+      if (res.status === 401) {
+        token = '';
+        localStorage.removeItem('utahmeta_token');
+        showLogin();
+        throw new Error('Session expired — please log in again');
+      }
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.status === 204 ? null : res.json();
+    }
+
+    function showMessage(msg, color = 'green') {
+      state.message = msg;
+      const el = document.getElementById('message');
+      if (el) {
+        el.textContent = msg;
+        el.className = `mb-4 p-2 rounded text-sm ${color === 'red' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+      }
+    }
+
+    // ---------- Library ----------
+
+    async function loadLibraries() {
+      try {
+        state.libraries = await api('/libraries');
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function loadItems(libraryId) {
+      try {
+        state.items = await api(`/libraries/${libraryId}/items`);
+        state.series = null;
+        state.mediaDetail = null;
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function loadSeries(seriesId) {
+      try {
+        state.series = await api(`/series/${seriesId}`);
+        state.items = [];
+        state.mediaDetail = null;
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function loadMedia(mediaItemId) {
+      try {
+        state.mediaDetail = await api(`/media/${mediaItemId}`);
+        state.session = null;
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function playMedia(mediaPath, clientId = 'web_chrome') {
+      try {
+        const body = {
+          deviceId: 'browser',
+          mediaPath,
+          clientId
+        };
+        state.session = await api('/play', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        setTab('player');
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    // ---------- Admin ----------
+
+    async function loadAdmin() {
+      try {
+        const [health, libraries, jobs, nodes, users, sessions, predictions] = await Promise.all([
+          api('/health').catch(() => ({ status: 'down' })),
+          api('/libraries').catch(() => []),
+          api('/preparation/jobs').catch(() => []),
+          api('/home-nodes').catch(() => []),
+          api('/users').catch(() => []),
+          api('/sessions').catch(() => []),
+          api('/predictions').catch(() => [])
+        ]);
+        state.adminData = { health, libraries, jobs, nodes, users, sessions, predictions };
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function scanLibrary() {
+      const rootPath = document.getElementById('scan-root').value;
+      try {
+        await api('/library/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rootPath })
+        });
+        showMessage('Library scan triggered');
+        loadAdmin();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function dequeuePrep() {
+      try {
+        await api('/preparation/dequeue', { method: 'POST' });
+        showMessage('Prep job dequeued');
+        loadAdmin();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function createHomeNode() {
+      const name = document.getElementById('hn-name').value;
+      const hardwareClass = document.getElementById('hn-class').value;
+      const cachePath = document.getElementById('hn-path').value;
+      try {
+        await api('/home-nodes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, hardwareClass, cachePath })
+        });
+        showMessage('Home node created');
+        loadAdmin();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    // ---------- Rendering ----------
+
+    function render() {
+      if (state.tab === 'library') renderLibrary();
+      else if (state.tab === 'admin') renderAdmin();
+      else if (state.tab === 'player') renderPlayer();
+    }
+
+    function renderLibrary() {
+      let html = `<div id="message" class="mb-4"></div>`;
+      html += `<div class="grid grid-cols-1 md:grid-cols-4 gap-4">`;
+
+      // Libraries
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Libraries</h2><ul class="space-y-1">`;
+      state.libraries.forEach(lib => {
+        html += `<li><button class="text-blue-600 hover:underline" onclick="loadItems('${lib.libraryId}')">${lib.name}</button></li>`;
+      });
+      html += `</ul></div>`;
+
+      // Items / Series
+      html += `<div class="bg-white p-4 rounded shadow md:col-span-3">`;
+      if (state.series) {
+        html += `<h2 class="font-bold mb-2">${state.series.title}</h2>`;
+        state.series.seasons.forEach(season => {
+          html += `<h3 class="font-semibold mt-3">Season ${season.seasonNumber}</h3><ul class="space-y-1">`;
+          season.mediaItems.forEach(ep => {
+            html += `<li><button class="text-blue-600 hover:underline" onclick="loadMedia('${ep.mediaItemId}')">${ep.title} ${ep.episodeNumber ? `(E${ep.episodeNumber})` : ''}</button></li>`;
+          });
+          html += `</ul>`;
+        });
+      } else if (state.items.length) {
+        html += `<h2 class="font-bold mb-2">Items</h2><ul class="space-y-1">`;
+        state.items.forEach(item => {
+          html += `<li><button class="text-blue-600 hover:underline" onclick="loadMedia('${item.mediaItemId}')">${item.title}</button></li>`;
+        });
+        html += `</ul>`;
+      } else {
+        html += `<p class="text-gray-500">Select a library to browse.</p>`;
+      }
+
+      // Detail
+      if (state.mediaDetail) {
+        const m = state.mediaDetail;
+        html += `<div class="mt-6 border-t pt-4">`;
+        html += `<h3 class="font-bold text-xl mb-2">${m.title}</h3>`;
+        html += `<p class="text-sm text-gray-600 mb-2">${m.itemType} ${m.releaseYear ? m.releaseYear : ''}</p>`;
+        if (m.watchState) {
+          html += `<p class="text-sm text-green-700 mb-2">Resume: ${Math.round(m.watchState.positionMs / 1000)}s ${m.watchState.completed ? '(completed)' : ''}</p>`;
+        }
+        if (m.fileAssets && m.fileAssets.length) {
+          html += `<label class="text-sm mr-2">Client:</label>`;
+          html += `<select id="client-select" class="border rounded p-1 text-sm mb-2">`;
+          html += `<option value="web_chrome">web_chrome</option>`;
+          html += `<option value="android_tv">android_tv</option>`;
+          html += `<option value="ios">ios</option>`;
+          html += `</select>`;
+          html += `<button class="ml-2 bg-blue-600 text-white px-3 py-1 rounded text-sm" onclick="playMedia('${m.fileAssets[0].sourcePath}', document.getElementById('client-select').value)">Play</button>`;
+        } else {
+          html += `<p class="text-red-600 text-sm">No file asset found.</p>`;
+        }
+        html += `</div>`;
+      }
+
+      html += `</div></div>`;
+      app.innerHTML = html;
+    }
+
+    function renderAdmin() {
+      const d = state.adminData;
+      let html = `<div id="message" class="mb-4"></div>`;
+
+      html += `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+
+      // Actions
+      html += `<div class="bg-white p-4 rounded shadow">`;
+      html += `<h2 class="font-bold mb-2">Actions</h2>`;
+      html += `<label class="text-sm">Scan root path (optional):</label>`;
+      html += `<input id="scan-root" type="text" class="w-full border rounded p-1 mb-2" placeholder="/media" />`;
+      html += `<button class="bg-blue-600 text-white px-3 py-1 rounded text-sm" onclick="scanLibrary()">Scan Library</button>`;
+      html += `<button class="ml-2 bg-green-600 text-white px-3 py-1 rounded text-sm" onclick="dequeuePrep()">Dequeue Prep Job</button>`;
+      html += `</div>`;
+
+      html += `<div class="bg-white p-4 rounded shadow">`;
+      html += `<h2 class="font-bold mb-2">Health</h2>`;
+      html += `<p class="text-sm">status: <span class="font-mono">${d.health ? d.health.status : 'unknown'}</span></p>`;
+      html += `</div>`;
+
+      html += `<div class="bg-white p-4 rounded shadow">`;
+      html += `<h2 class="font-bold mb-2">Create Home Node</h2>`;
+      html += `<input id="hn-name" type="text" class="w-full border rounded p-1 mb-1" placeholder="Name" />`;
+      html += `<input id="hn-class" type="text" class="w-full border rounded p-1 mb-1" placeholder="Hardware class" />`;
+      html += `<input id="hn-path" type="text" class="w-full border rounded p-1 mb-2" placeholder="Cache path" />`;
+      html += `<button class="bg-blue-600 text-white px-3 py-1 rounded text-sm" onclick="createHomeNode()">Create</button>`;
+      html += `</div>`;
+
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Libraries</h2><p class="text-sm">${d.libraries ? d.libraries.length : 0} libraries</p></div>`;
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Prep Jobs</h2><p class="text-sm">${d.jobs ? d.jobs.length : 0} jobs</p></div>`;
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Home Nodes</h2><p class="text-sm">${d.nodes ? d.nodes.length : 0} nodes</p></div>`;
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Users</h2><p class="text-sm">${d.users ? d.users.length : 0} users</p></div>`;
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Sessions</h2><p class="text-sm">${d.sessions ? d.sessions.length : 0} sessions</p></div>`;
+      html += `<div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-2">Predictions</h2><p class="text-sm">${d.predictions ? d.predictions.length : 0} predictions</p></div>`;
+
+      html += `</div>`;
+      app.innerHTML = html;
+    }
+
+    function renderPlayer() {
+      let html = `<div id="message" class="mb-4"></div>`;
+      if (state.session) {
+        const url = `${API}${state.session.streamUrl}`;
+        html += `<video id="player" class="w-full rounded shadow" controls autoplay src="${url}"></video>`;
+        html += `<div class="mt-2 text-sm text-gray-600">Session: ${state.session.sessionId} | Decision: ${state.session.decision.action} | Path: ${state.session.mediaPath}</div>`;
+        html += `<button class="mt-2 bg-red-600 text-white px-3 py-1 rounded text-sm" onclick="stopSession()">Stop</button>`;
+      } else {
+        html += `<p class="text-gray-500">Choose an item in the library to play.</p>`;
+      }
+      app.innerHTML = html;
+    }
+
+    async function stopSession() {
+      if (!state.session) return;
+      try {
+        await api(`/sessions/${state.session.sessionId}`, { method: 'DELETE' });
+        state.session = null;
+        showMessage('Session stopped');
+        render();
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    async function login() {
+      const authSubject = document.getElementById('login-subject').value;
+      const displayName = document.getElementById('login-name').value;
+      try {
+        const result = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authSubject, displayName })
+        });
+        if (!result.ok) throw new Error(await result.text());
+        const data = await result.json();
+        token = data.token;
+        localStorage.setItem('utahmeta_token', token);
+        document.getElementById('login-panel').classList.add('hidden');
+        document.getElementById('main-panel').classList.remove('hidden');
+        setTab('library');
+      } catch (err) { showMessage(err.message, 'red'); }
+    }
+
+    function showLogin() {
+      document.getElementById('login-panel').classList.remove('hidden');
+      document.getElementById('main-panel').classList.add('hidden');
+    }
+
+    // expose functions for inline onclicks
+    window.loadItems = loadItems;
+    window.loadSeries = loadSeries;
+    window.loadMedia = loadMedia;
+    window.playMedia = playMedia;
+    window.scanLibrary = scanLibrary;
+    window.dequeuePrep = dequeuePrep;
+    window.createHomeNode = createHomeNode;
+    window.stopSession = stopSession;
+    window.login = login;
+
+    // init
+    if (token) {
+      document.getElementById('main-panel').classList.remove('hidden');
+      setTab('library');
+    } else {
+      showLogin();
+    }
+  </script>
+</body>
+</html>

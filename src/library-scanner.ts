@@ -16,8 +16,17 @@
 
 import { readdir, stat } from "fs/promises";
 import { join, extname, basename, sep, relative } from "path";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { probeMediaFile } from "./ffprobe-integration";
+import {
+  isEnabled as metadataEnabled,
+  searchMovie,
+  searchSeries,
+  getEpisode,
+  downloadArtwork,
+  cleanTitle,
+} from "./metadata-provider";
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"]);
 
@@ -25,7 +34,9 @@ export interface ScanResult {
   scanJobId: string;
   filesFound: number;
   added: number;
-  skipped: number;
+  updated: number; // existing file whose bytes changed on disk, re-probed
+  skipped: number; // existing file, unchanged
+  removed: number; // file gone from disk, pruned from the index
   failed: number;
 }
 
@@ -60,6 +71,7 @@ async function findVideoFiles(dir: string): Promise<string[]> {
 interface DetectedItem {
   kind: "movie" | "episode";
   title: string;
+  year?: number;
   seriesName?: string;
   seasonNumber?: number;
   episodeNumber?: number;
@@ -98,7 +110,10 @@ function detectItem(rootPath: string, filePath: string): DetectedItem {
     }
   }
 
-  return { kind: "movie", title: bareTitle };
+  // Movie: strip release-tag noise and pull the year out of the filename
+  // so the metadata provider can search on a clean title.
+  const { title, year } = cleanTitle(bareTitle);
+  return { kind: "movie", title, year: year ?? undefined };
 }
 
 // ---------- Ensure parent rows exist ----------
@@ -147,6 +162,217 @@ async function ensureSeason(seriesId: string, seasonNumber: number) {
   });
 }
 
+// ---------- Metadata enrichment (movies) ----------
+// Best-effort TMDB lookup: replaces the filename-guessed title with the
+// canonical one, fills in release year + runtime, records the external id,
+// and downloads poster/backdrop artwork. Only runs when TMDB_API_KEY is set
+// (checked by the caller via metadataEnabled()).
+
+async function enrichMovie(
+  mediaItemId: string,
+  detected: DetectedItem,
+  probedDurationSeconds: number
+): Promise<void> {
+  const meta = await searchMovie(detected.title, detected.year);
+  if (!meta) {
+    console.debug(`[library-scanner] no TMDB match for movie "${detected.title}"`);
+    return;
+  }
+
+  // Prefer the real file's duration (ffprobe) over TMDB's advertised
+  // runtime; fall back to TMDB only when ffprobe couldn't determine it.
+  const runtimeMs =
+    probedDurationSeconds > 0
+      ? probedDurationSeconds * 1000
+      : meta.runtimeMinutes
+      ? meta.runtimeMinutes * 60 * 1000
+      : null;
+
+  await prisma.mediaItem.update({
+    where: { mediaItemId },
+    data: {
+      title: meta.title,
+      releaseYear: meta.releaseYear ?? undefined,
+      runtimeMs: runtimeMs ?? undefined,
+      canonicalMetadataId: `${meta.provider}:${meta.externalKey}`,
+    },
+  });
+
+  // Record the external id, tolerant of re-scans (unique on provider+key).
+  await prisma.externalIdMap.upsert({
+    where: { provider_externalKey: { provider: meta.provider, externalKey: meta.externalKey } },
+    update: { mediaItemId },
+    create: { mediaItemId, provider: meta.provider, externalKey: meta.externalKey },
+  });
+
+  // Download artwork. Each is independent — a failed backdrop shouldn't
+  // block the poster from being saved.
+  for (const [kind, urlPath] of [
+    ["poster", meta.posterUrlPath] as const,
+    ["backdrop", meta.backdropUrlPath] as const,
+  ]) {
+    try {
+      const art = await downloadArtwork(mediaItemId, kind, urlPath);
+      if (art) {
+        await prisma.artworkAsset.create({
+          data: { mediaItemId, kind: art.kind, storageUri: art.storageUri },
+        });
+      }
+    } catch (err) {
+      console.error(`[library-scanner] ${kind} download failed for "${meta.title}":`, err);
+    }
+  }
+}
+
+// ---------- Metadata enrichment (TV) ----------
+// Series are enriched once (tmdbId acts as the "done" marker) — canonical
+// title is intentionally NOT overwritten because Series is deduped by
+// (libraryId, title); changing it would make the next scan create a
+// duplicate. We store the TMDB id, first-air year, and poster/backdrop
+// paths, and return the tmdbId so the episode lookup can reuse it.
+
+async function enrichSeries(seriesId: string, seriesName: string): Promise<string | null> {
+  const existing = await prisma.series.findUnique({
+    where: { seriesId },
+    select: { tmdbId: true },
+  });
+  if (existing?.tmdbId) return existing.tmdbId; // already enriched this scan/run
+
+  const meta = await searchSeries(seriesName);
+  if (!meta) {
+    console.debug(`[library-scanner] no TMDB match for series "${seriesName}"`);
+    return null;
+  }
+
+  let posterUri: string | undefined;
+  let backdropUri: string | undefined;
+  try {
+    const poster = await downloadArtwork(`series-${seriesId}`, "poster", meta.posterUrlPath);
+    posterUri = poster?.storageUri;
+  } catch (err) {
+    console.error(`[library-scanner] series poster download failed for "${meta.title}":`, err);
+  }
+  try {
+    const backdrop = await downloadArtwork(`series-${seriesId}`, "backdrop", meta.backdropUrlPath);
+    backdropUri = backdrop?.storageUri;
+  } catch (err) {
+    console.error(`[library-scanner] series backdrop download failed for "${meta.title}":`, err);
+  }
+
+  await prisma.series.update({
+    where: { seriesId },
+    data: {
+      tmdbId: meta.externalKey,
+      firstAirYear: meta.firstAirYear ?? undefined,
+      posterUri,
+      backdropUri,
+    },
+  });
+
+  return meta.externalKey;
+}
+
+async function enrichEpisode(
+  mediaItemId: string,
+  seriesId: string,
+  detected: DetectedItem,
+  probedDurationSeconds: number
+): Promise<void> {
+  if (detected.seasonNumber == null || detected.episodeNumber == null) return;
+
+  const tvId = await enrichSeries(seriesId, detected.seriesName ?? "");
+  if (!tvId) return;
+
+  const ep = await getEpisode(tvId, detected.seasonNumber, detected.episodeNumber);
+  if (!ep) {
+    console.debug(
+      `[library-scanner] no TMDB episode for tv ${tvId} s${detected.seasonNumber}e${detected.episodeNumber}`
+    );
+    return;
+  }
+
+  // Prefer the real file's duration (ffprobe) over TMDB's advertised runtime.
+  const runtimeMs =
+    probedDurationSeconds > 0
+      ? probedDurationSeconds * 1000
+      : ep.runtimeMinutes
+      ? ep.runtimeMinutes * 60 * 1000
+      : null;
+
+  await prisma.mediaItem.update({
+    where: { mediaItemId },
+    data: {
+      title: ep.title,
+      releaseYear: ep.airYear ?? undefined,
+      runtimeMs: runtimeMs ?? undefined,
+      canonicalMetadataId: `${ep.provider}:${ep.externalKey}`,
+    },
+  });
+
+  await prisma.externalIdMap.upsert({
+    where: { provider_externalKey: { provider: ep.provider, externalKey: ep.externalKey } },
+    update: { mediaItemId },
+    create: { mediaItemId, provider: ep.provider, externalKey: ep.externalKey },
+  });
+
+  try {
+    const still = await downloadArtwork(mediaItemId, "still", ep.stillUrlPath);
+    if (still) {
+      await prisma.artworkAsset.create({
+        data: { mediaItemId, kind: still.kind, storageUri: still.storageUri },
+      });
+    }
+  } catch (err) {
+    console.error(`[library-scanner] episode still download failed for "${ep.title}":`, err);
+  }
+}
+
+// ---------- Prune files that disappeared from disk ----------
+// Any FileAsset in this library whose sourcePath is no longer present in the
+// current walk gets removed, along with its MediaItem and that item's
+// dependent rows. Deletion order matters because the schema has no cascade
+// rules — children must go before parents. Empty Series/Season shells are
+// left behind (harmless, and cheap to leave).
+
+async function pruneMissingFiles(
+  libraryId: string,
+  presentPaths: Set<string>
+): Promise<number> {
+  const indexed = await prisma.fileAsset.findMany({
+    where: { mediaItem: { libraryId } },
+    select: { fileAssetId: true, sourcePath: true, mediaItemId: true },
+  });
+
+  const missing = indexed.filter(
+    (f: { sourcePath: string }) => !presentPaths.has(f.sourcePath)
+  );
+  let removed = 0;
+
+  for (const file of missing) {
+    try {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const mediaItemId = file.mediaItemId;
+        // Dependent rows first (no ON DELETE cascade in the schema).
+        await tx.artworkAsset.deleteMany({ where: { mediaItemId } });
+        await tx.externalIdMap.deleteMany({ where: { mediaItemId } });
+        await tx.mediaGenre.deleteMany({ where: { mediaItemId } });
+        await tx.mediaCredit.deleteMany({ where: { mediaItemId } });
+        await tx.collectionItem.deleteMany({ where: { mediaItemId } });
+        await tx.watchState.deleteMany({ where: { mediaItemId } });
+        await tx.preparationJob.deleteMany({ where: { mediaItemId } });
+        await tx.versionVariant.deleteMany({ where: { mediaItemId } });
+        await tx.fileAsset.deleteMany({ where: { mediaItemId } });
+        await tx.mediaItem.delete({ where: { mediaItemId } });
+      });
+      removed++;
+    } catch (err) {
+      console.error(`[library-scanner] failed to prune "${file.sourcePath}":`, err);
+    }
+  }
+
+  return removed;
+}
+
 // ---------- Core scan ----------
 
 export async function scanLibrary(rootPath: string): Promise<ScanResult> {
@@ -162,7 +388,9 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
   });
 
   let added = 0;
+  let updated = 0;
   let skipped = 0;
+  let removed = 0;
   let failed = 0;
   let filesFound: string[] = [];
 
@@ -171,23 +399,61 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
 
     for (const filePath of filesFound) {
       try {
+        const stats = await stat(filePath);
+        // Postgres DateTime is millisecond-precision, so floor the fs
+        // mtime to ms before storing/comparing or equality never holds.
+        const fileMtime = new Date(Math.floor(stats.mtimeMs));
+
         const existing = await prisma.fileAsset.findUnique({
           where: { sourcePath: filePath },
+          select: {
+            fileAssetId: true,
+            mediaItemId: true,
+            sizeBytes: true,
+            modifiedAt: true,
+          },
         });
+
         if (existing) {
-          skipped++;
+          const unchanged =
+            existing.modifiedAt != null &&
+            existing.modifiedAt.getTime() === fileMtime.getTime() &&
+            existing.sizeBytes === BigInt(stats.size);
+          if (unchanged) {
+            skipped++;
+            continue;
+          }
+
+          // File changed on disk (re-encoded, replaced in place). Re-probe
+          // just the technical fields + runtime; it's still the same
+          // logical item, so leave title/metadata/artwork alone.
+          const changed = await probeMediaFile(filePath);
+          await prisma.fileAsset.update({
+            where: { fileAssetId: existing.fileAssetId },
+            data: {
+              container: changed.container,
+              videoCodec: changed.videoCodec,
+              audioCodec: changed.audioCodec,
+              sizeBytes: BigInt(stats.size),
+              modifiedAt: fileMtime,
+            },
+          });
+          if (changed.durationSeconds > 0) {
+            await prisma.mediaItem.update({
+              where: { mediaItemId: existing.mediaItemId },
+              data: { runtimeMs: changed.durationSeconds * 1000 },
+            });
+          }
+          updated++;
           continue;
         }
 
-        const [profile, stats] = await Promise.all([
-          probeMediaFile(filePath),
-          stat(filePath),
-        ]);
-
+        const profile = await probeMediaFile(filePath);
         const detected = detectItem(rootPath, filePath);
 
-        await prisma.$transaction(async (tx: typeof prisma) => {
+        const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           let seasonId: string | undefined;
+          let seriesId: string | undefined;
 
           if (detected.kind === "episode" && detected.seriesName && detected.seasonNumber) {
             // Note: ensureSeries/ensureSeason use the module-level
@@ -198,6 +464,7 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
             const series = await ensureSeries(library.libraryId, detected.seriesName);
             const season = await ensureSeason(series.seriesId, detected.seasonNumber);
             seasonId = season.seasonId;
+            seriesId = series.seriesId;
           }
 
           const mediaItem = await tx.mediaItem.create({
@@ -207,6 +474,9 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
               itemType: detected.kind === "episode" ? "episode" : "movie",
               title: detected.title,
               episodeNumber: detected.episodeNumber,
+              runtimeMs: profile.durationSeconds > 0
+                ? profile.durationSeconds * 1000
+                : null,
             },
           });
 
@@ -219,9 +489,30 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
               videoCodec: profile.videoCodec,
               audioCodec: profile.audioCodec,
               sizeBytes: BigInt(stats.size),
+              modifiedAt: fileMtime,
             },
           });
+
+          return { mediaItemId: mediaItem.mediaItemId, seriesId };
         });
+
+        // Metadata enrichment happens AFTER the DB transaction commits —
+        // it does network + disk I/O (TMDB lookup, artwork download), which
+        // must never hold a Postgres transaction open. Best-effort: a
+        // failed lookup leaves the ffprobe/filename-indexed row intact.
+        if (metadataEnabled() && detected.kind === "movie") {
+          try {
+            await enrichMovie(created.mediaItemId, detected, profile.durationSeconds);
+          } catch (err) {
+            console.error(`[library-scanner] metadata enrichment failed for "${filePath}":`, err);
+          }
+        } else if (metadataEnabled() && detected.kind === "episode" && created.seriesId) {
+          try {
+            await enrichEpisode(created.mediaItemId, created.seriesId, detected, profile.durationSeconds);
+          } catch (err) {
+            console.error(`[library-scanner] episode enrichment failed for "${filePath}":`, err);
+          }
+        }
 
         added++;
       } catch (err) {
@@ -231,6 +522,10 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
         failed++;
       }
     }
+
+    // Prune anything that vanished from disk since the last scan. Done
+    // after the walk so we have the full set of present paths to diff.
+    removed = await pruneMissingFiles(library.libraryId, new Set(filesFound));
 
     await prisma.scanJob.update({
       where: { scanJobId: scanJob.scanJobId },
@@ -248,7 +543,9 @@ export async function scanLibrary(rootPath: string): Promise<ScanResult> {
     scanJobId: scanJob.scanJobId,
     filesFound: filesFound.length,
     added,
+    updated,
     skipped,
+    removed,
     failed,
   };
 }

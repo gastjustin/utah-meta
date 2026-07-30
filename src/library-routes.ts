@@ -138,6 +138,28 @@ libraryRouter.get("/media/:id", async (req: Request, res: Response) => {
   res.json({ ...mediaItem, watchState });
 });
 
+// ---------- Ready variants for a media item ----------
+// GET /media/:id/variants
+
+libraryRouter.get("/media/:id/variants", async (req: Request, res: Response) => {
+  const mediaItem = await prisma.mediaItem.findUnique({
+    where: { mediaItemId: req.params.id },
+    select: { mediaItemId: true },
+  });
+  if (!mediaItem) return res.status(404).json({ error: "Media item not found" });
+
+  const variants = await prisma.versionVariant.findMany({
+    where: { mediaItemId: req.params.id },
+    include: {
+      compatibilityProfile: true,
+      sourceFileAsset: true,
+      outputStorageVolume: true,
+    },
+    orderBy: { prepState: "desc" },
+  });
+  res.json(variants);
+});
+
 // ---------- Search ----------
 // GET /search?q=dune
 

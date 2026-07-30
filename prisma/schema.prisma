@@ -36,6 +36,13 @@ model Series {
   title     String
   sortTitle String? @map("sort_title")
   status    String?
+  // Metadata enrichment (Phase 4). Populated from TMDB when TMDB_API_KEY
+  // is set; tmdbId doubles as the "already enriched" marker so we only
+  // look a series up once across a scan.
+  tmdbId       String? @map("tmdb_id")
+  firstAirYear Int?    @map("first_air_year")
+  posterUri    String? @map("poster_uri")
+  backdropUri  String? @map("backdrop_uri")
 
   library Library  @relation(fields: [libraryId], references: [libraryId])
   seasons Season[]
@@ -68,6 +75,7 @@ model MediaItem {
   releaseYear       Int?     @map("release_year")
   canonicalMetadataId String? @map("canonical_metadata_id")
 
+  library      Library        @relation(fields: [libraryId], references: [libraryId])
   season       Season?        @relation(fields: [seasonId], references: [seasonId])
   artworkAssets ArtworkAsset[]
   mediaCredits  MediaCredit[]
@@ -113,6 +121,10 @@ model FileAsset {
   videoCodec       String  @map("video_codec")
   audioCodec       String  @map("audio_codec")
   sizeBytes        BigInt  @map("size_bytes")
+  // Last-modified timestamp of the file on disk at scan time. Lets the
+  // scanner do incremental rescans: skip files whose mtime + size are
+  // unchanged, re-probe only the ones that actually changed.
+  modifiedAt       DateTime? @map("modified_at")
 
   mediaItem      MediaItem       @relation(fields: [mediaItemId], references: [mediaItemId])
   storageVolume  StorageVolume   @relation(fields: [storageVolumeId], references: [storageVolumeId])
@@ -126,12 +138,15 @@ model VersionVariant {
   mediaItemId          String  @map("media_item_id")
   sourceFileAssetId    String  @map("source_file_asset_id")
   compatibilityProfileId String? @map("compatibility_profile_id")
+  storageUri           String? @map("storage_uri") // prepared output file path
+  storageVolumeId      String? @map("storage_volume_id")
   directPlayReady      Boolean @default(false) @map("direct_play_ready")
   prepState            String  @map("prep_state") // "pending" | "ready" | "failed"
 
   mediaItem MediaItem @relation(fields: [mediaItemId], references: [mediaItemId])
   sourceFileAsset FileAsset @relation(fields: [sourceFileAssetId], references: [fileAssetId])
   compatibilityProfile CompatibilityProfile? @relation(fields: [compatibilityProfileId], references: [compatibilityProfileId])
+  outputStorageVolume StorageVolume? @relation(fields: [storageVolumeId], references: [storageVolumeId], name: "variant_outputs")
   preparationJobs PreparationJob[]
 
   @@map("version_variant")
@@ -146,6 +161,7 @@ model StorageVolume {
   rebuildable     Boolean @default(false)
 
   fileAssets FileAsset[]
+  variantOutputs VersionVariant[] @relation(name: "variant_outputs")
 
   @@map("storage_volume")
 }
@@ -227,6 +243,7 @@ model UserProfile {
   userId            String  @id @default(uuid()) @map("user_id")
   displayName        String  @map("display_name")
   authSubject         String  @unique @map("auth_subject")
+  isAdmin             Boolean @default(false) @map("is_admin")
   defaultAudioPolicyId String? @map("default_audio_policy_id")
   homeNodeId          String? @map("home_node_id")
 
@@ -246,7 +263,6 @@ model DeviceProfile {
   lastSeenAt     DateTime? @map("last_seen_at")
 
   user        UserProfile  @relation(fields: [userId], references: [userId])
-  watchStates WatchState[]
 
   @@map("device_profile")
 }
@@ -270,7 +286,7 @@ model WatchState {
 
 model CompatibilityProfile {
   compatibilityProfileId String @id @default(uuid()) @map("compatibility_profile_id")
-  name           String
+  name           String @unique
   container      String
   videoCodec     String  @map("video_codec")
   audioCodec     String  @map("audio_codec")

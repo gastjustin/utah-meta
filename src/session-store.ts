@@ -24,6 +24,8 @@ export interface PlaybackSession {
   sessionId: string;
   userId: string;
   deviceId: string;
+  mediaItemId?: string;
+  clientType?: string;
   mediaPath: string;
   decision: PlaybackDecision;
   state: PlaybackState;
@@ -31,6 +33,8 @@ export interface PlaybackSession {
   durationSeconds: number;
   startedAt: string;
   updatedAt: string;
+  audioTrackIndex?: number;
+  subtitleTrackIndex?: number | "off";
 }
 
 const SESSION_KEY_PREFIX = "session:";

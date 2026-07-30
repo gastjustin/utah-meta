@@ -5,10 +5,18 @@
  */
 
 import { Router, Request, Response } from "express";
+import { resolve, sep } from "path";
+import { prisma } from "./db";
 import { probeMediaFile } from "./ffprobe-integration";
 import { decidePlaybackStrategy, CLIENT_CAPABILITIES } from "./direct-play-engine";
 import { streamHandler, killStreamProcess } from "./ffmpeg-stream-engine";
 import { scanLibrary } from "./library-scanner";
+import {
+  getOrCreateCompatibilityProfile,
+  findReadyVariant,
+  queuePrepJob,
+  runPrepJob,
+} from "./preparation-engine";
 import {
   getSession,
   sessionExists,
@@ -17,6 +25,42 @@ import {
   updateSessionState,
   removeSession,
 } from "./session-store";
+
+// ---------- mediaPath allow-list ----------
+// A mediaPath may only point at files under a configured library root,
+// the MEDIA_MOUNT_PATH env var, or the PREPARED_MEDIA_PATH where pre-
+// transcoded variants live. This prevents a crafted request from asking
+// the server to ffprobe/stream arbitrary files outside these roots.
+// Paths must be absolute; relative paths are rejected.
+
+async function getAllowedMediaRoots(): Promise<string[]> {
+  const roots = new Set<string>();
+  if (process.env.MEDIA_MOUNT_PATH) roots.add(process.env.MEDIA_MOUNT_PATH);
+  if (process.env.PREPARED_MEDIA_PATH) roots.add(process.env.PREPARED_MEDIA_PATH);
+
+  const libraries = await prisma.library.findMany({
+    select: { rootPath: true },
+  });
+  for (const lib of libraries) roots.add(lib.rootPath);
+
+  return Array.from(roots).map((r) => resolve(r));
+}
+
+async function isWithinAllowedMediaRoot(mediaPath: string): Promise<boolean> {
+  const resolved = resolve(mediaPath);
+  const target = resolved.toLowerCase();
+
+  const roots = await getAllowedMediaRoots();
+  if (roots.length === 0) return false;
+
+  for (const root of roots) {
+    const normalizedRoot = resolve(root).toLowerCase() + sep;
+    if (target === resolve(root).toLowerCase() || target.startsWith(normalizedRoot)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const router = Router();
 
@@ -44,19 +88,22 @@ router.post("/library/scan", async (req: Request, res: Response) => {
 });
 
 // ---------- Start playback: probe file, decide strategy, create session ----------
-// Body: { userId, deviceId, mediaPath, clientId }
+// Body: { deviceId, mediaPath, clientId }
+// The user is taken from the bearer token (req.user).
 // clientId must match a key in CLIENT_CAPABILITIES (direct-play-engine.ts)
 router.post("/play", async (req: Request, res: Response) => {
-  const { userId, deviceId, mediaPath, clientId } = req.body as {
-    userId: string;
+  const userId = req.user!.authSubject;
+  const { deviceId, mediaPath, clientId, audioTrackIndex, subtitleTrackIndex } = req.body as {
     deviceId: string;
     mediaPath: string;
     clientId: string;
+    audioTrackIndex?: number;
+    subtitleTrackIndex?: number | "off";
   };
 
-  if (!userId || !deviceId || !mediaPath || !clientId) {
+  if (!deviceId || !mediaPath || !clientId) {
     return res.status(400).json({
-      error: "userId, deviceId, mediaPath, and clientId are required",
+      error: "deviceId, mediaPath, and clientId are required",
     });
   }
 
@@ -67,21 +114,72 @@ router.post("/play", async (req: Request, res: Response) => {
     });
   }
 
+  if (!(await isWithinAllowedMediaRoot(mediaPath))) {
+    return res.status(400).json({
+      error:
+        "mediaPath must be an absolute path under a configured library root " +
+        "or MEDIA_MOUNT_PATH",
+    });
+  }
+
   try {
-    const media = await probeMediaFile(mediaPath);
-    const decision = decidePlaybackStrategy(media, client);
+    const fileAsset = await prisma.fileAsset.findUnique({
+      where: { sourcePath: mediaPath },
+      select: { fileAssetId: true, mediaItemId: true },
+    });
+
+    const originalMedia = await probeMediaFile(mediaPath);
+    let playMedia = originalMedia;
+    let playPath = mediaPath;
+    let decision = decidePlaybackStrategy(originalMedia, client);
+
+    // If the source isn't direct-playable for this client, look for an
+    // already-prepared VersionVariant and/or queue a background prep job.
+    if (decision.action !== "DIRECT_PLAY" && fileAsset?.mediaItemId) {
+      const compatProfileId = await getOrCreateCompatibilityProfile(client);
+      const ready = await findReadyVariant(fileAsset.mediaItemId, compatProfileId);
+
+      if (ready?.storageUri) {
+        const variantMedia = await probeMediaFile(ready.storageUri);
+        const variantDecision = decidePlaybackStrategy(variantMedia, client);
+        if (variantDecision.action === "DIRECT_PLAY") {
+          playMedia = variantMedia;
+          playPath = ready.storageUri;
+          decision = variantDecision;
+        }
+      }
+
+      // If we still aren't using a ready variant, queue a prep for next time.
+      if (playPath === mediaPath) {
+        queuePrepJob(fileAsset.mediaItemId, fileAsset.fileAssetId, compatProfileId).catch(
+          (err) => console.error("[preparation] queue prep failed:", err)
+        );
+      }
+    }
+
+    if (!(await isWithinAllowedMediaRoot(playPath))) {
+      return res.status(400).json({
+        error: "Resolved playback path is outside allowed media roots",
+      });
+    }
 
     const session = await createSession({
       userId,
       deviceId,
-      mediaPath,
+      mediaItemId: fileAsset?.mediaItemId,
+      clientType: clientId,
+      mediaPath: playPath,
       decision,
-      durationSeconds: 0, // populate from ffprobe format.duration if you extend MediaProfile
+      durationSeconds: playMedia.durationSeconds,
+      audioTrackIndex,
+      subtitleTrackIndex,
     });
 
     res.status(201).json({
       session,
       streamUrl: `/stream/${session.sessionId}`,
+      audioTracks: playMedia.audioTracks,
+      subtitleTracks: playMedia.subtitleTracks,
     });
   } catch (err) {
     console.error("Failed to start playback:", err);
@@ -94,9 +192,20 @@ router.get("/stream/:sessionId", async (req: Request, res: Response) => {
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
+  if (!(await isWithinAllowedMediaRoot(session.mediaPath))) {
+    return res.status(400).json({
+      error:
+        "Session mediaPath is no longer under a configured library root " +
+        "or MEDIA_MOUNT_PATH",
+    });
+  }
+
   try {
     const media = await probeMediaFile(session.mediaPath);
-    const handler = streamHandler(media, session.decision, session.sessionId);
+    const handler = streamHandler(media, session.decision, session.sessionId, {
+      audioTrackIndex: session.audioTrackIndex,
+      subtitleTrackIndex: session.subtitleTrackIndex,
+    });
     handler(req, res);
   } catch (err) {
     console.error(`Failed to stream session ${session.sessionId}:`, err);
@@ -135,6 +244,194 @@ router.get("/sessions", async (_req: Request, res: Response) => {
   res.json(await listSessions());
 });
 
-router.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok" });
+// ---------- Preparation layer management ----------
+
+router.get("/preparation/jobs", async (_req: Request, res: Response) => {
+  const jobs = await prisma.preparationJob.findMany({
+    orderBy: { queuedAt: "desc" },
+    take: 100,
+  });
+  res.json(jobs);
+});
+
+// Queue a prep job for a specific media item + client profile.
+// Body: { mediaItemId, sourceFileAssetId, clientId }
+router.post("/preparation/queue", async (req: Request, res: Response) => {
+  const { mediaItemId, sourceFileAssetId, clientId } = req.body as {
+    mediaItemId: string;
+    sourceFileAssetId: string;
+    clientId: string;
+  };
+
+  if (!mediaItemId || !sourceFileAssetId || !clientId) {
+    return res.status(400).json({
+      error: "mediaItemId, sourceFileAssetId, and clientId are required",
+    });
+  }
+
+  const client = CLIENT_CAPABILITIES[clientId];
+  if (!client) {
+    return res.status(400).json({
+      error: `Unknown clientId "${clientId}"`,
+    });
+  }
+
+  try {
+    const compatProfileId = await getOrCreateCompatibilityProfile(client);
+    await queuePrepJob(mediaItemId, sourceFileAssetId, compatProfileId);
+    res.status(202).json({ status: "queued" });
+  } catch (err) {
+    console.error("[preparation] queue failed:", err);
+    res.status(500).json({ error: "Failed to queue preparation job", detail: String(err) });
+  }
+});
+
+// Kick the next queued prep job in the background. Returns 202 immediately;
+// the job itself runs async and updates status in the database.
+router.post("/preparation/dequeue", async (_req: Request, res: Response) => {
+  const job = await prisma.preparationJob.findFirst({
+    where: { status: "queued" },
+    orderBy: { queuedAt: "asc" },
+  });
+
+  if (!job) {
+    return res.status(404).json({ error: "No queued preparation jobs" });
+  }
+
+  runPrepJob(job.prepJobId).catch((err) =>
+    console.error(`[preparation] job ${job.prepJobId} failed:`, err)
+  );
+
+  res.status(202).json({ prepJobId: job.prepJobId, status: "running" });
+});
+
+// ---------- Predictions and home nodes ----------
+
+router.get("/predictions", async (_req: Request, res: Response) => {
+  const predictions = await prisma.predictionEvent.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  res.json(predictions);
+});
+
+router.get("/home-nodes", async (_req: Request, res: Response) => {
+  const nodes = await prisma.homeNode.findMany({
+    orderBy: { lastHeartbeatAt: "desc" },
+  });
+  res.json(nodes);
+});
+
+router.post("/home-nodes", async (req: Request, res: Response) => {
+  const { name, hardwareClass, cachePath } = req.body as {
+    name: string;
+    hardwareClass: string;
+    cachePath: string;
+  };
+  if (!name || !hardwareClass || !cachePath) {
+    return res.status(400).json({
+      error: "name, hardwareClass, and cachePath are required",
+    });
+  }
+  const node = await prisma.homeNode.create({
+    data: { name, hardwareClass, cachePath },
+  });
+  res.status(201).json(node);
+});
+
+router.get("/home-nodes/:id", async (req: Request, res: Response) => {
+  const node = await prisma.homeNode.findUnique({
+    where: { homeNodeId: req.params.id },
+  });
+  if (!node) return res.status(404).json({ error: "Home node not found" });
+  res.json(node);
+});
+
+router.patch("/home-nodes/:id/heartbeat", async (req: Request, res: Response) => {
+  const node = await prisma.homeNode.update({
+    where: { homeNodeId: req.params.id },
+    data: { lastHeartbeatAt: new Date() },
+  });
+  res.json(node);
+});
+
+router.delete("/home-nodes/:id", async (req: Request, res: Response) => {
+  await prisma.homeNode.delete({
+    where: { homeNodeId: req.params.id },
+  });
+  res.status(204).send();
+});
+
+// Desired pull manifest for a home node: ready variants for items that
+// have been predicted for users assigned to this node.
+router.get("/home-nodes/:id/manifest", async (req: Request, res: Response) => {
+  const homeNode = await prisma.homeNode.findUnique({
+    where: { homeNodeId: req.params.id },
+  });
+  if (!homeNode) return res.status(404).json({ error: "Home node not found" });
+
+  const users = await prisma.userProfile.findMany({
+    where: { homeNodeId: homeNode.homeNodeId },
+    select: { userId: true },
+  });
+  if (users.length === 0) return res.json([]);
+
+  const userIds = users.map((u: { userId: string }) => u.userId);
+  const predictions = await prisma.predictionEvent.findMany({
+    where: { userId: { in: userIds } },
+    orderBy: { createdAt: "desc" },
+    distinct: ["predictedMediaItemId"],
+    select: { predictedMediaItemId: true },
+    take: 50,
+  });
+
+  const mediaItemIds = predictions.map(
+    (p: { predictedMediaItemId: string }) => p.predictedMediaItemId
+  );
+  if (mediaItemIds.length === 0) return res.json([]);
+
+  const variants = await prisma.versionVariant.findMany({
+    where: {
+      mediaItemId: { in: mediaItemIds },
+      prepState: "ready",
+      directPlayReady: true,
+      storageUri: { not: null },
+    },
+    include: {
+      compatibilityProfile: true,
+      mediaItem: { select: { title: true } },
+      outputStorageVolume: { select: { rootPath: true } },
+    },
+  });
+
+  res.json(variants);
+});
+
+// Download a prepared variant. Validates the resolved storageUri is under
+// an allowed root (prepared media path, library roots, or media mount).
+router.get("/download/variant/:variantId", async (req: Request, res: Response) => {
+  const variant = await prisma.versionVariant.findUnique({
+    where: { variantId: req.params.variantId },
+    include: { compatibilityProfile: true },
+  });
+
+  if (!variant?.storageUri) {
+    return res
+      .status(404)
+      .json({ error: "Variant not found or not ready" });
+  }
+
+  if (!(await isWithinAllowedMediaRoot(variant.storageUri))) {
+    return res.status(403).json({
+      error: "Variant storage path is outside allowed media roots",
+    });
+  }
+
+  res.setHeader("Content-Type", "video/mp4");
+  res.sendFile(variant.storageUri, (err) => {
+    if (err) {
+      console.error(`[download] failed for variant ${req.params.variantId}:`, err);
+      if (!res.headersSent) res.status(500).end();
+    }
+  });
 });
