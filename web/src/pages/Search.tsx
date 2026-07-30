@@ -51,47 +51,54 @@ export default function Search() {
   }, [query]);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="fade-in px-6 md:px-8 py-6 max-w-6xl mx-auto">
       <div className="relative mb-8">
-        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-600" />
         <input
           type="text"
           placeholder="Search movies, shows, episodes..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
-          className="w-full bg-gray-800 text-white border border-gray-700 rounded-lg pl-12 pr-12 py-3 text-lg focus:outline-none focus:border-blue-500"
+          className="w-full bg-white/5 text-white border border-white/10 rounded-xl pl-12 pr-12 py-3.5 text-lg focus:outline-none focus:border-amber-500/50 transition"
         />
         {query && (
           <button
             onClick={() => setQuery("")}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600 hover:text-white transition"
           >
             <X className="w-5 h-5" />
           </button>
         )}
       </div>
 
-      {loading && <p className="text-gray-400">Searching...</p>}
+      {loading && (
+        <div className="text-gray-500 text-sm">Searching...</div>
+      )}
 
       {!loading && searched && results && results.series.length === 0 && results.items.length === 0 && (
-        <p className="text-gray-500 text-sm">No results for "{query}"</p>
+        <div className="flex flex-col items-center justify-center py-24 text-gray-600">
+          <SearchIcon className="w-12 h-12 mb-3" />
+          <p>No results for "{query}"</p>
+        </div>
       )}
 
       {results?.series && results.series.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-gray-400 text-sm font-medium uppercase tracking-wide mb-3">Shows</h2>
+          <h2 className="text-gray-500 text-xs uppercase tracking-wide mb-3">Shows</h2>
           <div className="space-y-2">
             {results.series.map((s) => (
               <Link
                 key={s.seriesId}
                 to={`/series/${s.seriesId}`}
-                className="flex items-center gap-3 bg-gray-800 hover:bg-gray-700 rounded-lg p-3 transition"
+                className="flex items-center gap-3 bg-[#151517] hover:bg-[#1a1a1e] rounded-xl p-4 transition card-hover"
               >
-                <Tv className="w-5 h-5 text-blue-400 flex-shrink-0" />
+                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                  <Tv className="w-5 h-5 text-amber-500" />
+                </div>
                 <div className="flex-1">
                   <p className="text-white font-medium">{s.title}</p>
-                  <p className="text-gray-500 text-xs">{s._count.seasons} season{s._count.seasons !== 1 ? "s" : ""} · {s.status}</p>
+                  <p className="text-gray-500 text-xs mt-0.5">{s._count.seasons} season{s._count.seasons !== 1 ? "s" : ""} · {s.status}</p>
                 </div>
               </Link>
             ))}
@@ -101,7 +108,7 @@ export default function Search() {
 
       {results?.items && results.items.length > 0 && (
         <div>
-          <h2 className="text-gray-400 text-sm font-medium uppercase tracking-wide mb-3">
+          <h2 className="text-gray-500 text-xs uppercase tracking-wide mb-3">
             {results.series.length > 0 ? "Episodes & Movies" : "Results"}
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -109,12 +116,14 @@ export default function Search() {
               <Link
                 key={item.mediaItemId}
                 to={`/media/${item.mediaItemId}`}
-                className="flex items-center gap-3 bg-gray-800 hover:bg-gray-700 rounded-lg p-3 transition"
+                className="flex items-center gap-3 bg-[#151517] hover:bg-[#1a1a1e] rounded-xl p-4 transition card-hover"
               >
-                <Film className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                  <Film className="w-5 h-5 text-gray-500" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">{item.title}</p>
-                  <p className="text-gray-500 text-xs">
+                  <p className="text-gray-500 text-xs mt-0.5">
                     {item.itemType}
                     {item.releaseYear ? ` · ${item.releaseYear}` : ""}
                     {item.runtimeMs ? ` · ${Math.round(item.runtimeMs / 60000)}min` : ""}

@@ -205,7 +205,7 @@ export default function VideoPlayer({
   return (
     <div
       ref={containerRef}
-      className="relative bg-black rounded-lg overflow-hidden group"
+      className="relative bg-black rounded-2xl overflow-hidden group"
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => playing && setShowControls(false)}
       style={{ cursor: showControls ? "default" : "none" }}
@@ -253,7 +253,7 @@ export default function VideoPlayer({
               videoRef.current?.load();
               videoRef.current?.play().catch(() => {});
             }}
-            className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition"
+            className="mt-4 bg-amber-500 hover:bg-amber-400 text-black font-medium px-4 py-2 rounded-lg text-sm transition"
           >
             Retry
           </button>
@@ -290,29 +290,29 @@ export default function VideoPlayer({
             />
             {/* Progress */}
             <div
-              className="absolute h-full bg-blue-500 rounded-full"
+              className="absolute h-full bg-amber-500 rounded-full"
               style={{ width: `${progressPct}%` }}
             >
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 bg-blue-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition" />
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 bg-amber-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition" />
             </div>
           </div>
 
           {/* Buttons row */}
           <div className="flex items-center gap-3 text-white">
-            <button onClick={togglePlay} className="hover:text-blue-400 transition" title="Play/Pause (Space)">
+            <button onClick={togglePlay} className="hover:text-amber-400 transition" title="Play/Pause (Space)">
               {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
 
-            <button onClick={() => skip(-10)} className="hover:text-blue-400 transition" title="Back 10s (←)">
+            <button onClick={() => skip(-10)} className="hover:text-amber-400 transition" title="Back 10s (←)">
               <SkipBack className="w-5 h-5" />
             </button>
-            <button onClick={() => skip(10)} className="hover:text-blue-400 transition" title="Forward 10s (→)">
+            <button onClick={() => skip(10)} className="hover:text-amber-400 transition" title="Forward 10s (→)">
               <SkipForward className="w-5 h-5" />
             </button>
 
             {/* Volume */}
             <div className="flex items-center gap-2 group/vol">
-              <button onClick={toggleMute} className="hover:text-blue-400 transition" title="Mute (M)">
+              <button onClick={toggleMute} className="hover:text-amber-400 transition" title="Mute (M)">
                 {muted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
               <input
@@ -322,7 +322,7 @@ export default function VideoPlayer({
                 step="0.05"
                 value={muted ? 0 : volume}
                 onChange={handleVolumeChange}
-                className="w-0 group-hover/vol:w-20 transition-all duration-200 accent-blue-500 cursor-pointer"
+                className="w-0 group-hover/vol:w-20 transition-all duration-200 accent-amber-500 cursor-pointer"
               />
             </div>
 
@@ -335,7 +335,7 @@ export default function VideoPlayer({
             <div className="flex-1" />
 
             {/* Fullscreen */}
-            <button onClick={toggleFullscreen} className="hover:text-blue-400 transition" title="Fullscreen (F)">
+            <button onClick={toggleFullscreen} className="hover:text-amber-400 transition" title="Fullscreen (F)">
               {fullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
           </div>

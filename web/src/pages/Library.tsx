@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Film, Search as SearchIcon, Library as LibraryIcon, Tv, Play, Clock } from "lucide-react";
+import { Film, Search as SearchIcon, Library as LibraryIcon, Tv, Play, Clock, ChevronRight } from "lucide-react";
 
 interface Library {
   libraryId: string;
@@ -72,77 +72,104 @@ export default function LibraryPage() {
   }
 
   if (loading)
-    return <div className="text-gray-400 p-8">Loading libraries...</div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-gray-500 text-sm">Loading your library...</div>
+      </div>
+    );
+
+  const heroItem = items[0] || null;
+  const showHero = !selectedLib && heroItem;
 
   return (
-    <div className="flex h-full flex-col sm:flex-row">
-      {/* Sidebar: libraries + search link */}
-      <aside className="w-full sm:w-56 bg-gray-800 border-b sm:border-b-0 sm:border-r border-gray-700 p-4 space-y-6 overflow-y-auto flex-shrink-0 max-h-48 sm:max-h-none">
-        <div>
-          <h2 className="text-xs uppercase text-gray-500 mb-2 flex items-center gap-1">
-            <LibraryIcon className="w-3 h-3" /> Libraries
-          </h2>
-          <ul className="space-y-1">
-            {libraries.map((lib) => (
-              <li key={lib.libraryId}>
-                <button
-                  onClick={() => selectLibrary(lib.libraryId)}
-                  className={`w-full text-left px-3 py-2 rounded text-sm transition ${
-                    selectedLib === lib.libraryId
-                      ? "bg-blue-600 text-white"
-                      : "text-gray-300 hover:bg-gray-700"
-                  }`}
-                >
-                  {lib.name}
-                  <span className="text-gray-500 ml-2">({lib._count.mediaItems})</span>
-                </button>
-              </li>
-            ))}
-            {libraries.length === 0 && (
-              <li className="text-gray-500 text-xs px-3 py-2">No libraries yet. Run a scan from Admin.</li>
-            )}
-          </ul>
+    <div className="fade-in">
+      {/* Hero banner */}
+      {showHero && heroItem.artworkAssets?.find((a) => a.kind === "backdrop") && (
+        <div className="relative h-[50vh] min-h-[340px] w-full overflow-hidden">
+          <img
+            src={`/artwork/${heroItem.artworkAssets!.find((a) => a.kind === "backdrop")!.artworkAssetId}`}
+            alt={heroItem.title}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 hero-gradient" />
+          <div className="absolute inset-0 hero-gradient-left" />
+          <div className="absolute bottom-0 left-0 right-0 p-8 md:p-12">
+            <h1 className="text-3xl md:text-5xl font-bold text-white mb-3 drop-shadow-lg">
+              {heroItem.title}
+            </h1>
+            <p className="text-gray-300 text-sm md:text-base mb-4">
+              {heroItem.releaseYear} · {Math.round((heroItem.runtimeMs || 0) / 60000)} min
+            </p>
+            <Link
+              to={`/media/${heroItem.mediaItemId}`}
+              className="inline-flex items-center gap-2 bg-white text-black font-medium px-6 py-2.5 rounded-lg hover:bg-white/90 transition"
+            >
+              <Play className="w-5 h-5" fill="currentColor" /> Play
+            </Link>
+          </div>
+        </div>
+      )}
+
+      <div className="px-6 md:px-8 py-6 space-y-8">
+        {/* Library selector pills */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { setSelectedLib(null); setItems([]); setSeriesList([]); }}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+              !selectedLib ? "bg-white/15 text-white" : "text-gray-500 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            All
+          </button>
+          {libraries.map((lib) => (
+            <button
+              key={lib.libraryId}
+              onClick={() => selectLibrary(lib.libraryId)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+                selectedLib === lib.libraryId
+                  ? "bg-white/15 text-white"
+                  : "text-gray-500 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              {lib.name}
+            </button>
+          ))}
         </div>
 
-        <Link
-          to="/search"
-          className="flex items-center gap-2 text-gray-300 hover:text-white text-sm px-3 py-2 rounded hover:bg-gray-700 transition"
-        >
-          <SearchIcon className="w-4 h-4" /> Search
-        </Link>
-      </aside>
-
-      {/* Main: continue watching + items grid */}
-      <main className="flex-1 p-6 overflow-y-auto">
         {/* Continue Watching */}
         {continueWatching.length > 0 && !selectedLib && (
-          <div className="mb-8">
-            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-blue-400" /> Continue Watching
-            </h2>
-            <div className="flex gap-4 overflow-x-auto pb-2">
+          <Section title="Continue Watching" icon={<Clock className="w-5 h-5 text-amber-500" />}>
+            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">
               {continueWatching.map((item) => (
                 <Link
                   key={item.mediaItemId}
                   to={`/media/${item.mediaItemId}`}
-                  className="flex-shrink-0 w-48 bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-700 transition group"
+                  className="flex-shrink-0 w-64 card-hover bg-[#151517] rounded-xl overflow-hidden group"
                 >
-                  <div className="w-full aspect-video bg-gray-700 flex items-center justify-center relative">
-                    <Play className="w-8 h-8 text-white/60 group-hover:text-blue-400 transition" fill="currentColor" />
-                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600">
+                  <div className="w-full aspect-video bg-[#1a1a1e] relative">
+                    <img
+                      src={`/artwork/${item.mediaItemId}-backdrop.jpg`}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/40">
+                      <Play className="w-10 h-10 text-white" fill="currentColor" />
+                    </div>
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
                       <div
-                        className="h-full bg-blue-500"
+                        className="h-full bg-amber-500"
                         style={{
                           width: `${item.runtimeMs ? Math.min(100, (item.positionMs / item.runtimeMs) * 100) : 0}%`,
                         }}
                       />
                     </div>
                   </div>
-                  <div className="p-2">
+                  <div className="p-3">
                     <h3 className="text-white text-sm font-medium truncate">
                       {item.seriesTitle || item.title}
                     </h3>
-                    <p className="text-gray-500 text-xs truncate">
+                    <p className="text-gray-500 text-xs truncate mt-0.5">
                       {item.seasonNumber && item.episodeNumber
                         ? `S${item.seasonNumber} E${item.episodeNumber} · ${item.title}`
                         : item.title}
@@ -151,74 +178,88 @@ export default function LibraryPage() {
                 </Link>
               ))}
             </div>
-          </div>
+          </Section>
         )}
 
         {/* Series grid */}
         {seriesList.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Tv className="w-5 h-5 text-blue-400" /> TV Shows
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <Section title="TV Shows" icon={<Tv className="w-5 h-5 text-amber-500" />}>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
               {seriesList.map((s) => (
                 <Link
                   key={s.seriesId}
                   to={`/series/${s.seriesId}`}
-                  className="bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-700 transition group"
+                  className="card-hover bg-[#151517] rounded-xl overflow-hidden group"
                 >
-                  <div className="w-full aspect-video bg-gray-700 flex items-center justify-center text-gray-500 group-hover:text-blue-400">
-                    <Tv className="w-8 h-8" />
+                  <div className="w-full aspect-[2/3] bg-[#1a1a1e] flex items-center justify-center text-gray-600 group-hover:text-amber-500 transition">
+                    <Tv className="w-10 h-10" />
                   </div>
-                  <div className="p-2">
+                  <div className="p-2.5">
                     <h3 className="text-white text-sm font-medium truncate">{s.title}</h3>
-                    <p className="text-gray-500 text-xs">{s._count.seasons} season{s._count.seasons !== 1 ? "s" : ""}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">{s._count.seasons} season{s._count.seasons !== 1 ? "s" : ""}</p>
                   </div>
                 </Link>
               ))}
             </div>
-          </div>
+          </Section>
         )}
 
-        {/* Items grid */}
-        {items.length > 0 ? (
-          <>
-            <h2 className="text-lg font-bold text-white mb-4">
-              {seriesList.length > 0 ? "Movies" : libraries.find((l) => l.libraryId === selectedLib)?.name}
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        {/* Movies grid */}
+        {items.length > 0 && (
+          <Section title={selectedLib ? "Movies" : "Recently Added"}>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
               {items.map((item) => (
-                <ItemCard key={item.mediaItemId} item={item} />
+                <PosterCard key={item.mediaItemId} item={item} />
               ))}
             </div>
-          </>
-        ) : selectedLib ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+          </Section>
+        )}
+
+        {/* Empty states */}
+        {selectedLib && items.length === 0 && seriesList.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-600">
             <Film className="w-16 h-16 mb-4" />
             <p>This library is empty.</p>
           </div>
-        ) : !continueWatching.length && libraries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+        )}
+
+        {!selectedLib && !showHero && libraries.length === 0 && continueWatching.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-600">
             <Film className="w-16 h-16 mb-4" />
             <p>No libraries yet. Run a scan from the Admin page.</p>
+            <Link to="/admin" className="mt-4 text-amber-500 hover:text-amber-400 text-sm">
+              Go to Admin →
+            </Link>
           </div>
-        ) : null}
-      </main>
+        )}
+      </div>
     </div>
   );
 }
 
-function ItemCard({ item }: { item: MediaItem }) {
-  const icon = item.itemType === "episode" ? <Tv className="w-8 h-8" /> : <Film className="w-8 h-8" />;
+function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-4">
+        {icon}
+        <h2 className="text-xl font-bold text-white">{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function PosterCard({ item }: { item: MediaItem }) {
   const poster = item.artworkAssets?.find((a) => a.kind === "poster");
   const backdrop = item.artworkAssets?.find((a) => a.kind === "backdrop");
+  const icon = item.itemType === "episode" ? <Tv className="w-10 h-10" /> : <Film className="w-10 h-10" />;
 
   return (
     <Link
       to={`/media/${item.mediaItemId}`}
-      className="bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-700 transition group"
+      className="card-hover bg-[#151517] rounded-xl overflow-hidden group"
     >
-      <div className="w-full aspect-video bg-gray-700 flex items-center justify-center text-gray-500 group-hover:text-blue-400 relative">
+      <div className="w-full aspect-[2/3] bg-[#1a1a1e] flex items-center justify-center text-gray-600 group-hover:text-amber-500 transition relative">
         {poster || backdrop ? (
           <img
             src={`/artwork/${(poster || backdrop)!.artworkAssetId}`}
@@ -226,18 +267,21 @@ function ItemCard({ item }: { item: MediaItem }) {
             className="w-full h-full object-cover"
             loading="lazy"
             onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
+              const img = e.target as HTMLImageElement;
+              img.style.display = "none";
             }}
           />
         ) : (
           icon
         )}
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/50">
+          <Play className="w-10 h-10 text-white" fill="currentColor" />
+        </div>
       </div>
-      <div className="p-2">
+      <div className="p-2.5">
         <h3 className="text-white text-sm font-medium truncate">{item.title}</h3>
-        <p className="text-gray-500 text-xs">
-          {item.itemType}
-          {item.releaseYear ? ` · ${item.releaseYear}` : ""}
+        <p className="text-gray-500 text-xs mt-0.5">
+          {item.releaseYear ? item.releaseYear : item.itemType}
         </p>
       </div>
     </Link>

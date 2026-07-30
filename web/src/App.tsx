@@ -12,85 +12,110 @@ import SettingsPage from "./pages/Settings";
 import Collections from "./pages/Collections";
 import Sessions from "./pages/Sessions";
 import EdgeNodes from "./pages/EdgeNodes";
-import { Film, Library as LibIcon, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Settings as SettingsCog, Folder, Radio, Server, Menu, X } from "lucide-react";
+import { Film, Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 function Layout({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
   const admin = isAdmin();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navItem = (to: string, label: string, icon: React.ReactNode) => (
-    <Link
-      to={to}
-      onClick={() => setMobileOpen(false)}
-      className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded text-sm transition ${
-        loc.pathname === to || (to === "/" && loc.pathname.startsWith("/media"))
-          ? "bg-blue-600 text-white"
-          : "text-gray-400 hover:text-white hover:bg-gray-800"
-      }`}
-    >
-      {icon} <span className="hidden sm:inline">{label}</span>
-    </Link>
+
+  const navItems = [
+    { to: "/", label: "Home", icon: <Home className="w-5 h-5" /> },
+    { to: "/search", label: "Search", icon: <SearchIcon className="w-5 h-5" /> },
+    { to: "/collections", label: "Collections", icon: <Folder className="w-5 h-5" /> },
+    { to: "/sessions", label: "Sessions", icon: <Radio className="w-5 h-5" /> },
+    { to: "/edge-nodes", label: "Nodes", icon: <Server className="w-5 h-5" /> },
+    { to: "/settings", label: "Settings", icon: <Sliders className="w-5 h-5" /> },
+  ];
+  if (admin) {
+    navItems.push({ to: "/users", label: "Users", icon: <UsersIcon className="w-5 h-5" /> });
+    navItems.push({ to: "/admin", label: "Admin", icon: <Settings className="w-5 h-5" /> });
+  }
+
+  const isActive = (to: string) =>
+    loc.pathname === to || (to === "/" && loc.pathname.startsWith("/media"));
+
+  const sidebar = (
+    <nav className="flex flex-col gap-1">
+      {navItems.map((item) => (
+        <Link
+          key={item.to}
+          to={item.to}
+          onClick={() => setMobileOpen(false)}
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition ${
+            isActive(item.to)
+              ? "bg-white/10 text-white"
+              : "text-gray-500 hover:text-white hover:bg-white/5"
+          }`}
+        >
+          {item.icon}
+          <span>{item.label}</span>
+        </Link>
+      ))}
+    </nav>
   );
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="bg-gray-950 border-b border-gray-800 px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <Film className="w-6 h-6 text-blue-500" />
-          <span className="text-lg font-bold hidden sm:inline">UtahMeta</span>
+    <div className="min-h-screen bg-[#0a0a0b] text-white flex">
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex flex-col w-56 bg-[#0f0f11] border-r border-white/5 fixed h-full z-40">
+        <div className="flex items-center gap-2.5 px-5 py-5 border-b border-white/5">
+          <Film className="w-7 h-7 text-amber-500" />
+          <span className="text-lg font-bold tracking-tight">UtahMeta</span>
         </div>
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-2">
-          {navItem("/", "Library", <LibIcon className="w-4 h-4" />)}
-          {navItem("/search", "Search", <SearchIcon className="w-4 h-4" />)}
-          {navItem("/collections", "Collections", <Folder className="w-4 h-4" />)}
-          {navItem("/sessions", "Sessions", <Radio className="w-4 h-4" />)}
-          {navItem("/edge-nodes", "Nodes", <Server className="w-4 h-4" />)}
-          {navItem("/settings", "Settings", <SettingsCog className="w-4 h-4" />)}
-          {admin && navItem("/users", "Users", <UsersIcon className="w-4 h-4" />)}
-          {admin && navItem("/admin", "Admin", <Settings className="w-4 h-4" />)}
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          {sidebar}
+        </div>
+        <div className="px-3 py-4 border-t border-white/5">
           <button
             onClick={() => {
               clearToken();
               window.location.href = "/login";
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition"
+            className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-white hover:bg-white/5 transition w-full"
           >
-            <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Sign out</span>
+            <LogOut className="w-5 h-5" /> Sign out
           </button>
-        </nav>
-        {/* Mobile menu button */}
+        </div>
+      </aside>
+
+      {/* Mobile top bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 bg-[#0f0f11] border-b border-white/5 px-4 py-3 flex items-center justify-between z-50">
+        <div className="flex items-center gap-2">
+          <Film className="w-6 h-6 text-amber-500" />
+          <span className="font-bold">UtahMeta</span>
+        </div>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="md:hidden text-gray-400 hover:text-white p-2"
+          className="text-gray-400 hover:text-white p-1"
         >
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
-      </header>
-      {/* Mobile nav drawer */}
+      </div>
+
+      {/* Mobile drawer */}
       {mobileOpen && (
-        <nav className="md:hidden bg-gray-950 border-b border-gray-800 px-4 py-3 flex flex-col gap-1">
-          {navItem("/", "Library", <LibIcon className="w-4 h-4" />)}
-          {navItem("/search", "Search", <SearchIcon className="w-4 h-4" />)}
-          {navItem("/collections", "Collections", <Folder className="w-4 h-4" />)}
-          {navItem("/sessions", "Sessions", <Radio className="w-4 h-4" />)}
-          {navItem("/edge-nodes", "Nodes", <Server className="w-4 h-4" />)}
-          {navItem("/settings", "Settings", <SettingsCog className="w-4 h-4" />)}
-          {admin && navItem("/users", "Users", <UsersIcon className="w-4 h-4" />)}
-          {admin && navItem("/admin", "Admin", <Settings className="w-4 h-4" />)}
-          <button
-            onClick={() => {
-              clearToken();
-              window.location.href = "/login";
-            }}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition"
-          >
-            <LogOut className="w-4 h-4" /> Sign out
-          </button>
-        </nav>
+        <div className="md:hidden fixed inset-0 top-12 bg-[#0f0f11] z-30 p-4 overflow-y-auto">
+          {sidebar}
+          <div className="mt-4 pt-4 border-t border-white/5">
+            <button
+              onClick={() => {
+                clearToken();
+                window.location.href = "/login";
+              }}
+              className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-white hover:bg-white/5 transition w-full"
+            >
+              <LogOut className="w-5 h-5" /> Sign out
+            </button>
+          </div>
+        </div>
       )}
-      <main className="h-[calc(100vh-56px)]">{children}</main>
+
+      {/* Main content */}
+      <main className="flex-1 md:ml-56 mt-12 md:mt-0 h-full overflow-y-auto">
+        {children}
+      </main>
     </div>
   );
 }
