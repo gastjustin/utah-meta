@@ -233,6 +233,61 @@ libraryRouter.get("/continue-watching", async (req: Request, res: Response) => {
   );
 });
 
+// ---------- Similar / More Like This ----------
+// GET /media/:id/similar
+// Returns up to 12 items that share at least one genre with the given item,
+// excluding the item itself. Sorted by number of shared genres (desc).
+
+libraryRouter.get("/media/:id/similar", async (req: Request, res: Response) => {
+  const item = await prisma.mediaItem.findUnique({
+    where: { mediaItemId: req.params.id },
+    select: { mediaItemId: true, libraryId: true },
+  });
+  if (!item) return res.status(404).json({ error: "Media item not found" });
+
+  // Get genre IDs for this item
+  const genreLinks = await prisma.mediaGenre.findMany({
+    where: { mediaItemId: req.params.id },
+    select: { genreId: true },
+  });
+  const genreIds = genreLinks.map((g: { genreId: string }) => g.genreId);
+  if (genreIds.length === 0) return res.json([]);
+
+  // Find other items that share any of these genres
+  const similar = await prisma.mediaItem.findMany({
+    where: {
+      mediaItemId: { not: req.params.id },
+      mediaGenres: { some: { genreId: { in: genreIds } } },
+    },
+    select: {
+      mediaItemId: true,
+      title: true,
+      itemType: true,
+      releaseYear: true,
+      runtimeMs: true,
+      artworkAssets: { select: { artworkAssetId: true, kind: true } },
+      mediaGenres: { select: { genreId: true } },
+    },
+    take: 30,
+  });
+
+  // Sort by number of shared genres (desc), then take 12
+  type SimilarItem = (typeof similar)[number];
+  const sharedCount = (m: SimilarItem) =>
+    m.mediaGenres.filter((g: { genreId: string }) => genreIds.includes(g.genreId)).length;
+
+  similar.sort((a: SimilarItem, b: SimilarItem) => sharedCount(b) - sharedCount(a));
+
+  res.json(similar.slice(0, 12).map((m: SimilarItem) => ({
+    mediaItemId: m.mediaItemId,
+    title: m.title,
+    itemType: m.itemType,
+    releaseYear: m.releaseYear,
+    runtimeMs: m.runtimeMs,
+    artworkAssets: m.artworkAssets,
+  })));
+});
+
 // ---------- Ready variants for a media item ----------
 // GET /media/:id/variants
 

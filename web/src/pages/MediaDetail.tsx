@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, CLIENT_IDS, getCurrentUser } from "../api";
-import { Play, ArrowLeft, Clock, AlertCircle, FolderPlus, Tv, Check, Star, Calendar, Film } from "lucide-react";
+import { api, detectClientId, getCurrentUser } from "../api";
+import { Play, ArrowLeft, Clock, AlertCircle, FolderPlus, Tv, Check, Star, Calendar, Film, User } from "lucide-react";
 import VideoPlayer from "../components/VideoPlayer";
 
 interface TrackInfo {
@@ -41,10 +41,19 @@ interface CollectionSummary {
   collectionType: string;
 }
 
+interface SimilarItem {
+  mediaItemId: string;
+  title: string;
+  itemType: string;
+  releaseYear?: number;
+  runtimeMs?: number;
+  artworkAssets?: { artworkAssetId: string; kind: string }[];
+}
+
 export default function MediaDetail() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<MediaDetail | null>(null);
-  const [clientId, setClientId] = useState("web_chrome");
+  const clientId = detectClientId();
   const [audioTrack, setAudioTrack] = useState<number | undefined>(undefined);
   const [subtitleTrack, setSubtitleTrack] = useState<number | "off" | undefined>(undefined);
   const [playing, setPlaying] = useState(false);
@@ -59,6 +68,7 @@ export default function MediaDetail() {
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [showAddCollection, setShowAddCollection] = useState(false);
   const [addedToCollection, setAddedToCollection] = useState("");
+  const [similar, setSimilar] = useState<SimilarItem[]>([]);
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -67,6 +77,7 @@ export default function MediaDetail() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
     api<CollectionSummary[]>("/collections").then(setCollections).catch(() => {});
+    api<SimilarItem[]>(`/media/${id}/similar`).then(setSimilar).catch(() => {});
   }, [id]);
 
   async function handlePlay() {
@@ -151,8 +162,10 @@ export default function MediaDetail() {
   const backdrop = item.artworkAssets?.find((a) => a.kind === "backdrop");
   const poster = item.artworkAssets?.find((a) => a.kind === "poster");
   const genres = item.mediaGenres?.map((g) => g.genre.name) || [];
-  const cast = item.mediaCredits?.filter((c) => c.creditRole === "actor").slice(0, 8) || [];
-  const directors = item.mediaCredits?.filter((c) => c.creditRole === "director") || [];
+  const allCredits = item.mediaCredits || [];
+  const cast = allCredits.filter((c) => c.creditRole === "actor");
+  const directors = allCredits.filter((c) => c.creditRole === "director");
+  const otherCrew = allCredits.filter((c) => c.creditRole !== "actor" && c.creditRole !== "director");
   const runtimeMin = item.runtimeMs ? Math.round(item.runtimeMs / 60000) : null;
 
   return (
@@ -282,15 +295,43 @@ export default function MediaDetail() {
           </div>
         </div>
 
-        {/* Cast */}
-        {cast.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-gray-500 text-xs uppercase tracking-wide mb-2">Cast</h3>
-            <div className="flex flex-wrap gap-2">
+        {/* Cast & Crew */}
+        {allCredits.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-xl font-bold text-white mb-4">Cast & Crew</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {directors.map((c) => (
+                <div key={`dir-${c.person.name}`} className="bg-[#151517] rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{c.person.name}</p>
+                    <p className="text-gray-500 text-xs">Director</p>
+                  </div>
+                </div>
+              ))}
               {cast.map((c) => (
-                <span key={c.person.name} className="bg-white/5 text-gray-300 text-sm px-3 py-1.5 rounded-lg">
-                  {c.person.name}
-                </span>
+                <div key={`act-${c.person.name}`} className="bg-[#151517] rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-gray-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{c.person.name}</p>
+                    <p className="text-gray-500 text-xs">Actor</p>
+                  </div>
+                </div>
+              ))}
+              {otherCrew.map((c) => (
+                <div key={`crew-${c.person.name}`} className="bg-[#151517] rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-gray-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{c.person.name}</p>
+                    <p className="text-gray-500 text-xs capitalize">{c.creditRole}</p>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -317,19 +358,6 @@ export default function MediaDetail() {
         {/* Play section */}
         {!playing ? (
           <div className="bg-[#151517] rounded-2xl p-6 space-y-4">
-            <div>
-              <label className="text-sm text-gray-500 block mb-2">Client</label>
-              <select
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                className="bg-[#1a1a1e] text-white border border-white/10 rounded-lg px-4 py-2.5 w-full text-sm"
-              >
-                {CLIENT_IDS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-
             {item.fileAssets?.length > 0 ? (
               <button
                 onClick={handlePlay}
@@ -405,6 +433,49 @@ export default function MediaDetail() {
             >
               Stop
             </button>
+          </div>
+        )}
+
+        {/* More Like This */}
+        {similar.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-xl font-bold text-white mb-4">More Like This</h3>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+              {similar.map((s) => {
+                const sPoster = s.artworkAssets?.find((a) => a.kind === "poster");
+                const sBackdrop = s.artworkAssets?.find((a) => a.kind === "backdrop");
+                return (
+                  <Link
+                    key={s.mediaItemId}
+                    to={`/media/${s.mediaItemId}`}
+                    className="card-hover bg-[#151517] rounded-xl overflow-hidden group"
+                  >
+                    <div className="w-full aspect-[2/3] bg-[#1a1a1e] flex items-center justify-center text-gray-600 group-hover:text-amber-500 transition relative">
+                      {sPoster || sBackdrop ? (
+                        <img
+                          src={`/artwork/${(sPoster || sBackdrop)!.artworkAssetId}`}
+                          alt={s.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <Film className="w-10 h-10" />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/50">
+                        <Play className="w-10 h-10 text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                    <div className="p-2.5">
+                      <h3 className="text-white text-sm font-medium truncate">{s.title}</h3>
+                      <p className="text-gray-500 text-xs mt-0.5">
+                        {s.releaseYear ? s.releaseYear : s.itemType}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         )}
 

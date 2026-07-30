@@ -85,3 +85,23 @@ export const CLIENT_IDS = [
   "roku",
   "lg_webos",
 ];
+
+export function detectClientId(): string {
+  if (typeof navigator === "undefined") return "web_chrome";
+  const ua = navigator.userAgent;
+
+  // TV platforms
+  if (/Roku|RokuTV/i.test(ua)) return "roku";
+  if (/WebOS|webOS|LGPlayer/i.test(ua)) return "lg_webos";
+  if (/AppleTV|AppleTVOS|tvOS/i.test(ua)) return "apple_tv";
+  if (/AndroidTV|Android.*TV|Bravia/i.test(ua)) return "android_tv";
+
+  // Mobile platforms
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  if (/Android/i.test(ua) && /Mobile/i.test(ua)) return "android_mobile";
+
+  // Desktop browsers
+  if (/Firefox/i.test(ua)) return "web_firefox";
+  if (/Safari/i.test(ua) && !/Chrome|CriOS/i.test(ua)) return "web_safari";
+  return "web_chrome";
+}
