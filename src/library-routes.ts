@@ -14,6 +14,7 @@
 
 import { Router, Request, Response } from "express";
 import { prisma } from "./db";
+import { probeMediaFile } from "./ffprobe-integration";
 
 export const libraryRouter = Router();
 
@@ -113,6 +114,42 @@ libraryRouter.get("/series/:id", async (req: Request, res: Response) => {
   res.json(series);
 });
 
+// ---------- List all items across libraries ----------
+// GET /items?moviesOnly=true
+
+libraryRouter.get("/items", async (req: Request, res: Response) => {
+  const moviesOnly = req.query.moviesOnly === "true";
+  const items = await prisma.mediaItem.findMany({
+    where: moviesOnly ? { seasonId: null } : {},
+    select: {
+      mediaItemId: true,
+      title: true,
+      itemType: true,
+      releaseYear: true,
+      runtimeMs: true,
+      artworkAssets: { select: { artworkAssetId: true, kind: true } },
+    },
+    orderBy: { title: "asc" },
+    take: 200,
+  });
+  res.json(items);
+});
+
+// ---------- List all series across libraries ----------
+
+libraryRouter.get("/series", async (_req: Request, res: Response) => {
+  const series = await prisma.series.findMany({
+    select: {
+      seriesId: true,
+      title: true,
+      status: true,
+      _count: { select: { seasons: true } },
+    },
+    orderBy: { title: "asc" },
+  });
+  res.json(series);
+});
+
 // ---------- List items in a library ----------
 
 libraryRouter.get("/libraries/:id/items", async (req: Request, res: Response) => {
@@ -177,6 +214,86 @@ libraryRouter.get("/media/:id", async (req: Request, res: Response) => {
   }
 
   res.json({ ...mediaItem, watchState });
+});
+
+// ---------- Technical specs (resolution / HDR / codecs) ----------
+// GET /media/:id/probe — runs ffprobe against the primary file asset.
+// Fails soft (available: false) if ffprobe isn't installed or the file
+// isn't reachable from this process, since the UI treats this as an
+// optional enhancement rather than a hard dependency.
+
+libraryRouter.get("/media/:id/probe", async (req: Request, res: Response) => {
+  const mediaItem = await prisma.mediaItem.findUnique({
+    where: { mediaItemId: req.params.id },
+    select: { fileAssets: { select: { sourcePath: true }, take: 1 } },
+  });
+
+  const sourcePath = mediaItem?.fileAssets[0]?.sourcePath;
+  if (!sourcePath) {
+    return res.json({ available: false });
+  }
+
+  try {
+    const profile = await probeMediaFile(sourcePath);
+    res.json({
+      available: true,
+      container: profile.container,
+      videoCodec: profile.videoCodec,
+      audioCodec: profile.audioCodec,
+      resolution: profile.resolution,
+      isHDR: profile.isHDR,
+      bitrateMbps: profile.bitrateMbps,
+      audioTracks: profile.audioTracks,
+      subtitleTracks: profile.subtitleTracks,
+    });
+  } catch {
+    res.json({ available: false });
+  }
+});
+
+// ---------- Mark watched / rate ----------
+// POST /media/:id/watch-state — body: { completed?: boolean, rating?: 1-5 }
+// Upserts the caller's WatchState row. Used by the "Mark Watched" button
+// and the star rating control on the media detail page.
+
+libraryRouter.post("/media/:id/watch-state", async (req: Request, res: Response) => {
+  const authSubject = req.user?.authSubject;
+  if (!authSubject) return res.status(401).json({ error: "Authentication required" });
+
+  const { completed, rating } = req.body as { completed?: boolean; rating?: number };
+  if (rating !== undefined && (rating < 1 || rating > 5)) {
+    return res.status(400).json({ error: "rating must be between 1 and 5" });
+  }
+
+  const user = await prisma.userProfile.findUnique({ where: { authSubject }, select: { userId: true } });
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const mediaItem = await prisma.mediaItem.findUnique({
+    where: { mediaItemId: req.params.id },
+    select: { mediaItemId: true, runtimeMs: true },
+  });
+  if (!mediaItem) return res.status(404).json({ error: "Media item not found" });
+
+  const watchState = await prisma.watchState.upsert({
+    where: { userId_mediaItemId: { userId: user.userId, mediaItemId: mediaItem.mediaItemId } },
+    update: {
+      ...(completed !== undefined
+        ? { completed, positionMs: completed ? mediaItem.runtimeMs ?? 0 : 0 }
+        : {}),
+      ...(rating !== undefined ? { rating } : {}),
+      lastWatchedAt: new Date(),
+    },
+    create: {
+      userId: user.userId,
+      mediaItemId: mediaItem.mediaItemId,
+      positionMs: completed ? mediaItem.runtimeMs ?? 0 : 0,
+      completed: completed ?? false,
+      rating: rating ?? null,
+      lastWatchedAt: new Date(),
+    },
+  });
+
+  res.json(watchState);
 });
 
 // ---------- Continue Watching ----------

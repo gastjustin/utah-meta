@@ -192,6 +192,7 @@ async function enrichMovie(
     where: { mediaItemId },
     data: {
       title: meta.title,
+      overview: meta.overview ?? undefined,
       releaseYear: meta.releaseYear ?? undefined,
       runtimeMs: runtimeMs ?? undefined,
       canonicalMetadataId: `${meta.provider}:${meta.externalKey}`,
@@ -245,16 +246,7 @@ async function enrichMovie(
 
     for (const member of meta.cast) {
       if (!member.name) continue;
-      let person = await prisma.person.findFirst({
-        where: { name: member.name },
-        select: { personId: true },
-      });
-      if (!person) {
-        person = await prisma.person.create({
-          data: { name: member.name, personType: "actor" },
-          select: { personId: true },
-        });
-      }
+      const person = await upsertPerson(member.name, "actor", member.profilePath);
       await prisma.mediaCredit.create({
         data: {
           mediaItemId,
@@ -265,17 +257,8 @@ async function enrichMovie(
       });
     }
 
-    for (const dirName of meta.directors) {
-      let person = await prisma.person.findFirst({
-        where: { name: dirName },
-        select: { personId: true },
-      });
-      if (!person) {
-        person = await prisma.person.create({
-          data: { name: dirName, personType: "director" },
-          select: { personId: true },
-        });
-      }
+    for (const dir of meta.directors) {
+      const person = await upsertPerson(dir.name, "director", dir.profilePath);
       await prisma.mediaCredit.create({
         data: {
           mediaItemId,
@@ -286,6 +269,40 @@ async function enrichMovie(
       });
     }
   }
+}
+
+// Find-or-create a Person by name, downloading their TMDB headshot the
+// first time we see them (or if an existing row is missing one — cheap to
+// backfill on the next scan that references the same person).
+async function upsertPerson(
+  name: string,
+  personType: string,
+  profilePath: string | null
+): Promise<{ personId: string }> {
+  let person = await prisma.person.findFirst({
+    where: { name },
+    select: { personId: true, photoPath: true },
+  });
+  if (!person) {
+    person = await prisma.person.create({
+      data: { name, personType },
+      select: { personId: true, photoPath: true },
+    });
+  }
+  if (!person.photoPath && profilePath) {
+    try {
+      const photo = await downloadArtwork(`person-${person.personId}`, "photo", profilePath);
+      if (photo) {
+        await prisma.person.update({
+          where: { personId: person.personId },
+          data: { photoPath: photo.storageUri },
+        });
+      }
+    } catch (err) {
+      console.error(`[library-scanner] photo download failed for "${name}":`, err);
+    }
+  }
+  return { personId: person.personId };
 }
 
 // ---------- Metadata enrichment (TV) ----------
@@ -367,6 +384,7 @@ async function enrichEpisode(
     where: { mediaItemId },
     data: {
       title: ep.title,
+      overview: ep.overview ?? undefined,
       releaseYear: ep.airYear ?? undefined,
       runtimeMs: runtimeMs ?? undefined,
       canonicalMetadataId: `${ep.provider}:${ep.externalKey}`,

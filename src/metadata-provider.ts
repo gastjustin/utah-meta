@@ -43,13 +43,14 @@ export interface MovieMetadata {
   provider: "tmdb";
   externalKey: string; // TMDB id as string
   title: string;
+  overview: string | null;
   releaseYear: number | null;
   runtimeMinutes: number | null;
   posterUrlPath: string | null; // TMDB relative path, e.g. "/abc.jpg"
   backdropUrlPath: string | null;
   genres: string[];
-  cast: { name: string; role: string }[];
-  directors: string[];
+  cast: { name: string; role: string; profilePath: string | null }[];
+  directors: { name: string; profilePath: string | null }[];
 }
 
 export interface SeriesMetadata {
@@ -65,6 +66,7 @@ export interface EpisodeMetadata {
   provider: "tmdb";
   externalKey: string; // `${tvId}:s{season}e{episode}`
   title: string;
+  overview: string | null;
   airYear: number | null;
   runtimeMinutes: number | null;
   stillUrlPath: string | null;
@@ -127,18 +129,19 @@ export async function searchMovie(
   }
 
   // Fetch cast + directors from the credits endpoint.
-  let cast: { name: string; role: string }[] = [];
-  let directors: string[] = [];
+  let cast: { name: string; role: string; profilePath: string | null }[] = [];
+  let directors: { name: string; profilePath: string | null }[] = [];
   try {
     const credits = await tmdbGet(`/movie/${hit.id}/credits`, {});
     cast = (credits.cast || []).slice(0, 10).map((c: any) => ({
       name: c.name ?? "",
       role: c.character ?? "",
+      profilePath: c.profile_path ?? null,
     }));
     directors = (credits.crew || [])
       .filter((c: any) => c.job === "Director")
-      .map((c: any) => c.name)
-      .filter(Boolean);
+      .map((c: any) => ({ name: c.name ?? "", profilePath: c.profile_path ?? null }))
+      .filter((d: any) => d.name);
   } catch {
     // Best-effort — credits are nice-to-have, not essential.
   }
@@ -147,6 +150,7 @@ export async function searchMovie(
     provider: "tmdb",
     externalKey: String(hit.id),
     title: hit.title ?? title,
+    overview: hit.overview || null,
     releaseYear: parseYear(hit.release_date),
     runtimeMinutes,
     posterUrlPath: hit.poster_path ?? null,
@@ -189,6 +193,7 @@ export async function getEpisode(
       provider: "tmdb",
       externalKey: `${tvId}:s${seasonNumber}e${episodeNumber}`,
       title: d.name ?? `Episode ${episodeNumber}`,
+      overview: d.overview || null,
       airYear: parseYear(d.air_date),
       runtimeMinutes:
         typeof d.runtime === "number" && d.runtime > 0 ? d.runtime : null,

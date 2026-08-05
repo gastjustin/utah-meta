@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useState } from "react";
-import { getToken, clearToken, isAdmin } from "./api";
+import { getToken, clearToken, isAdmin, getCurrentUser } from "./api";
 import Login from "./pages/Login";
 import Library from "./pages/Library";
 import MediaDetail from "./pages/MediaDetail";
@@ -12,12 +12,13 @@ import SettingsPage from "./pages/Settings";
 import Collections from "./pages/Collections";
 import Sessions from "./pages/Sessions";
 import EdgeNodes from "./pages/EdgeNodes";
-import { Film, Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X } from "lucide-react";
+import { Film, Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 function Layout({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
   const admin = isAdmin();
+  const currentUser = getCurrentUser();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
@@ -43,7 +44,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           key={item.to}
           to={item.to}
           onClick={() => setMobileOpen(false)}
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition ${
+          className={`flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition ${
             isActive(item.to)
               ? "bg-white/10 text-white"
               : "text-gray-500 hover:text-white hover:bg-white/5"
@@ -56,24 +57,37 @@ function Layout({ children }: { children: React.ReactNode }) {
     </nav>
   );
 
+  const userLabel = currentUser?.displayName || currentUser?.authSubject || "User";
+  const userInitial = userLabel.charAt(0).toUpperCase();
+
   return (
-    <div className="min-h-screen bg-[#0a0a0b] text-white flex">
+    <div className="min-h-screen bg-[#050505] text-white flex">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col w-56 bg-[#0f0f11] border-r border-white/5 fixed h-full z-40">
-        <div className="flex items-center gap-2.5 px-5 py-5 border-b border-white/5">
+      <aside className="hidden md:flex flex-col w-60 bg-[#0a0a0a] border-r border-white/5 fixed h-full z-40">
+        <div className="flex items-center gap-2.5 px-5 py-5">
           <Film className="w-7 h-7 text-amber-500" />
-          <span className="text-lg font-bold tracking-tight">UtahMeta</span>
+          <span className="text-xl font-bold tracking-tight">UtahMeta</span>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-4">
           {sidebar}
         </div>
         <div className="px-3 py-4 border-t border-white/5">
+          <Link to="/settings" className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition group">
+            <div className="w-8 h-8 rounded-full bg-amber-900/40 text-amber-400 flex items-center justify-center text-sm font-bold">
+              {userInitial}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white font-medium truncate">{userLabel}</p>
+              <p className="text-xs text-gray-600 truncate group-hover:text-gray-500 transition">{currentUser?.authSubject}</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-gray-600" />
+          </Link>
           <button
             onClick={() => {
               clearToken();
               window.location.href = "/login";
             }}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-white hover:bg-white/5 transition w-full"
+            className="mt-2 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-white hover:bg-white/5 transition w-full"
           >
             <LogOut className="w-5 h-5" /> Sign out
           </button>
@@ -81,7 +95,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Mobile top bar */}
-      <div className="md:hidden fixed top-0 left-0 right-0 bg-[#0f0f11] border-b border-white/5 px-4 py-3 flex items-center justify-between z-50">
+      <div className="md:hidden fixed top-0 left-0 right-0 bg-[#0a0a0a] border-b border-white/5 px-4 py-3 flex items-center justify-between z-50">
         <div className="flex items-center gap-2">
           <Film className="w-6 h-6 text-amber-500" />
           <span className="font-bold">UtahMeta</span>
@@ -96,9 +110,18 @@ function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="md:hidden fixed inset-0 top-12 bg-[#0f0f11] z-30 p-4 overflow-y-auto">
+        <div className="md:hidden fixed inset-0 top-12 bg-[#0a0a0a] z-30 p-4 overflow-y-auto">
           {sidebar}
           <div className="mt-4 pt-4 border-t border-white/5">
+            <Link to="/settings" onClick={() => setMobileOpen(false)} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition mb-2">
+              <div className="w-8 h-8 rounded-full bg-amber-900/40 text-amber-400 flex items-center justify-center text-sm font-bold">
+                {userInitial}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white font-medium truncate">{userLabel}</p>
+                <p className="text-xs text-gray-600 truncate">{currentUser?.authSubject}</p>
+              </div>
+            </Link>
             <button
               onClick={() => {
                 clearToken();
@@ -113,7 +136,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main content */}
-      <main className="flex-1 md:ml-56 mt-12 md:mt-0 h-full overflow-y-auto">
+      <main className="flex-1 md:ml-60 mt-12 md:mt-0 h-full overflow-y-auto">
         {children}
       </main>
     </div>

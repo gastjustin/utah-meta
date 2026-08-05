@@ -5,7 +5,7 @@
 html, body, #root {
   height: 100%;
   margin: 0;
-  background: #0a0a0b;
+  background: #050505;
 }
 
 /* Custom scrollbar */
@@ -38,8 +38,9 @@ html, body, #root {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .card-hover:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.6);
+  z-index: 10;
 }
 
 /* Fade-in animation */
@@ -55,18 +56,18 @@ html, body, #root {
 .hero-gradient {
   background: linear-gradient(
     to bottom,
-    rgba(10, 10, 11, 0) 0%,
-    rgba(10, 10, 11, 0.3) 50%,
-    rgba(10, 10, 11, 0.9) 85%,
-    rgba(10, 10, 11, 1) 100%
+    rgba(5, 5, 5, 0) 0%,
+    rgba(5, 5, 5, 0.3) 50%,
+    rgba(5, 5, 5, 0.92) 85%,
+    rgba(5, 5, 5, 1) 100%
   );
 }
 
 .hero-gradient-left {
   background: linear-gradient(
     to right,
-    rgba(10, 10, 11, 0.9) 0%,
-    rgba(10, 10, 11, 0.6) 40%,
-    rgba(10, 10, 11, 0) 100%
+    rgba(5, 5, 5, 0.95) 0%,
+    rgba(5, 5, 5, 0.6) 35%,
+    rgba(5, 5, 5, 0) 70%
   );
 }

@@ -53,6 +53,18 @@ app.get("/artwork/:id", async (req, res) => {
   createReadStream(path).pipe(res);
 });
 
+// Public person photo serving — must be before requireAuth so <img> tags work.
+app.get("/person-photo/:id", async (req, res) => {
+  const person = await prisma.person.findUnique({
+    where: { personId: req.params.id },
+  });
+  if (!person?.photoPath || !existsSync(person.photoPath)) return res.status(404).end();
+  const ext = person.photoPath.split(".").pop()?.toLowerCase() || "jpg";
+  res.setHeader("Content-Type", ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  createReadStream(person.photoPath).pipe(res);
+});
+
 // Public stream endpoint — must be before requireAuth so <video> tags work.
 // The sessionId acts as a capability token.
 app.get("/stream/:sessionId", async (req, res) => {
@@ -72,7 +84,7 @@ app.get("/stream/:sessionId", async (req, res) => {
 });
 
 // SPA fallback: any non-API GET returns index.html so React Router handles it.
-app.get(/^(?!\/(auth|health|libraries|series|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|continue-watching|audio-policies|health-snapshots|collections|scan-jobs)).*/, (_req, res) => {
+app.get(/^(?!\/(auth|health|libraries|series|items|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|person-photo|continue-watching|audio-policies|health-snapshots|collections|scan-jobs)).*/, (_req, res) => {
   res.sendFile(join(__dirname, "..", "public", "dist", "index.html"), (err) => {
     if (err) res.sendFile(join(__dirname, "..", "public", "index.html"));
   });
