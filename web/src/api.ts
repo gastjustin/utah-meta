@@ -55,12 +55,13 @@ export async function api<T = any>(
 
 export async function login(
   authSubject: string,
+  password?: string,
   displayName?: string
 ): Promise<{ token: string; user: any }> {
   const res = await fetch("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ authSubject, displayName }),
+    body: JSON.stringify({ authSubject, password, displayName }),
   });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();

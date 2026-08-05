@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { login } from "../api";
-import { Film } from "lucide-react";
+import { Film, Lock } from "lucide-react";
 
 export default function Login() {
   const [authSubject, setAuthSubject] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     try {
-      await login(authSubject, displayName || undefined);
+      await login(authSubject, password || undefined);
       window.location.href = "/";
     } catch (err: any) {
       setError(err.message);
@@ -29,19 +29,22 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="text"
-            placeholder="User id (e.g. justin)"
+            placeholder="Username"
             value={authSubject}
             onChange={(e) => setAuthSubject(e.target.value)}
             className="w-full bg-white/5 text-white border border-white/10 rounded-xl p-3.5 text-sm focus:outline-none focus:border-amber-500/50 transition"
             required
           />
-          <input
-            type="text"
-            placeholder="Display name (optional)"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full bg-white/5 text-white border border-white/10 rounded-xl p-3.5 text-sm focus:outline-none focus:border-amber-500/50 transition"
-          />
+          <div className="relative">
+            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-white/5 text-white border border-white/10 rounded-xl pl-11 p-3.5 text-sm focus:outline-none focus:border-amber-500/50 transition"
+            />
+          </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             type="submit"

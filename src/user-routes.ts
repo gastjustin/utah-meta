@@ -15,22 +15,34 @@
 
 import { Router, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
+import { randomUUID, pbkdf2Sync } from "crypto";
 import { prisma } from "./db";
 import { CLIENT_CAPABILITIES } from "./direct-play-engine";
 
 export const userRouter = Router();
+
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_KEYLEN = 64;
+const PBKDF2_DIGEST = "sha512";
+
+function hashPassword(password: string): string {
+  const salt = randomUUID();
+  const derived = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, PBKDF2_DIGEST).toString("hex");
+  return `pbkdf2:${PBKDF2_ITERATIONS}:${salt}:${derived}`;
+}
 
 // ---------- Users ----------
 
 // POST /users — create a user. authSubject is the external identity used by
 // watch-state-sync; it's unique, so re-posting the same subject 409s.
 userRouter.post("/users", async (req: Request, res: Response) => {
-  const { displayName, authSubject, defaultAudioPolicyId, homeNodeId } =
+  const { displayName, authSubject, defaultAudioPolicyId, homeNodeId, password } =
     req.body as {
       displayName?: string;
       authSubject?: string;
       defaultAudioPolicyId?: string;
       homeNodeId?: string;
+      password?: string;
     };
 
   if (!displayName || !authSubject) {
@@ -47,7 +59,13 @@ userRouter.post("/users", async (req: Request, res: Response) => {
   }
 
   const user = await prisma.userProfile.create({
-    data: { displayName, authSubject, defaultAudioPolicyId, homeNodeId },
+    data: {
+      displayName,
+      authSubject,
+      defaultAudioPolicyId,
+      homeNodeId,
+      passwordHash: password ? hashPassword(password) : null,
+    },
   });
   res.status(201).json(user);
 });

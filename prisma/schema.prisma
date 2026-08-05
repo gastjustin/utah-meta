@@ -243,6 +243,7 @@ model UserProfile {
   userId            String  @id @default(uuid()) @map("user_id")
   displayName        String  @map("display_name")
   authSubject         String  @unique @map("auth_subject")
+  passwordHash       String? @map("password_hash")
   isAdmin             Boolean @default(false) @map("is_admin")
   defaultAudioPolicyId String? @map("default_audio_policy_id")
   homeNodeId          String? @map("home_node_id")
