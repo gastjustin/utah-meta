@@ -19,6 +19,8 @@ import { attachSessionWebSocket } from "./session-store";
 import { router } from "./routes";
 import { libraryRouter } from "./library-routes";
 import { userRouter } from "./user-routes";
+import { liveTvRouter } from "./live-tv-routes";
+import { serveLiveTvStream } from "./live-tv-stream";
 import { startPrepWorker } from "./preparation-engine";
 import { authRouter, requireAuth, requireAdmin } from "./auth";
 import { prisma } from "./db";
@@ -84,7 +86,7 @@ app.get("/stream/:sessionId", async (req, res) => {
 });
 
 // SPA fallback: any non-API GET returns index.html so React Router handles it.
-app.get(/^(?!\/(auth|health|libraries|series|items|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|person-photo|continue-watching|audio-policies|health-snapshots|collections|scan-jobs)).*/, (_req, res) => {
+app.get(/^(?!\/(auth|health|libraries|series|items|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|person-photo|continue-watching|audio-policies|health-snapshots|collections|scan-jobs|live-tv)).*/, (_req, res) => {
   res.sendFile(join(__dirname, "..", "public", "dist", "index.html"), (err) => {
     if (err) res.sendFile(join(__dirname, "..", "public", "index.html"));
   });
@@ -108,6 +110,7 @@ app.delete("/audio-policies/:id", requireAdmin);
 app.use(router);
 app.use(libraryRouter);
 app.use(userRouter);
+app.use(liveTvRouter);
 
 const httpServer = createServer(app);
 attachSessionWebSocket(httpServer);

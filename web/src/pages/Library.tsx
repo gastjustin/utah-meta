@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Film, Tv, Play, Clock } from "lucide-react";
+import { Film, Tv, Play, Clock, Radio } from "lucide-react";
 
 interface Library {
   libraryId: string;
@@ -41,12 +41,20 @@ interface SeriesSummary {
   _count: { seasons: number };
 }
 
+interface LiveTvChannel {
+  liveTvChannelId: string;
+  name: string;
+  logoUrl?: string;
+  groupName?: string;
+}
+
 export default function LibraryPage() {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [items, setItems] = useState<MediaItem[]>([]);
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
   const [selectedLib, setSelectedLib] = useState<string | null>(null);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
+  const [liveTvChannels, setLiveTvChannels] = useState<LiveTvChannel[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,11 +63,13 @@ export default function LibraryPage() {
       api<ContinueWatchingItem[]>("/continue-watching").catch(() => []),
       api<MediaItem[]>("/items?moviesOnly=true").catch(() => []),
       api<SeriesSummary[]>("/series").catch(() => []),
-    ]).then(([libs, cw, allItems, allSeries]) => {
+      api<LiveTvChannel[]>("/live-tv/channels").catch(() => []),
+    ]).then(([libs, cw, allItems, allSeries, liveTv]) => {
       setLibraries(libs);
       setContinueWatching(cw);
       setItems(allItems);
       setSeriesList(allSeries);
+      setLiveTvChannels(liveTv);
       setLoading(false);
     });
   }, []);
@@ -210,6 +220,42 @@ export default function LibraryPage() {
               <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-3 -mx-6 md:-mx-8 px-6 md:px-8">
                 {items.map((item) => (
                   <PosterCard key={item.mediaItemId} item={item} />
+                ))}
+              </div>
+            </HorizontalSection>
+          )}
+
+          {/* Live TV */}
+          {liveTvChannels.length > 0 && (
+            <HorizontalSection title={selectedLib ? "Live TV" : "Live TV"}>
+              <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-3 -mx-6 md:-mx-8 px-6 md:px-8">
+                {liveTvChannels.map((c) => (
+                  <Link
+                    key={c.liveTvChannelId}
+                    to="/live-tv"
+                    className="flex-shrink-0 w-36 card-hover bg-[#151517] rounded-xl overflow-hidden group"
+                  >
+                    <div className="w-full aspect-[2/3] bg-[#1a1a1e] flex items-center justify-center text-gray-600 group-hover:text-amber-500 transition relative">
+                      {c.logoUrl ? (
+                        <img
+                          src={c.logoUrl}
+                          alt={c.name}
+                          className="w-full h-full object-contain p-2"
+                          loading="lazy"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <Radio className="w-10 h-10" />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition bg-black/50">
+                        <Play className="w-10 h-10 text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                    <div className="p-2.5">
+                      <h3 className="text-white text-sm font-medium truncate">{c.name}</h3>
+                      <p className="text-gray-500 text-xs mt-0.5 truncate">{c.groupName || "Live"}</p>
+                    </div>
+                  </Link>
                 ))}
               </div>
             </HorizontalSection>

@@ -13,6 +13,7 @@ import {
   Pencil,
   Check,
   X,
+  Radio,
 } from "lucide-react";
 
 interface AudioPolicy {
@@ -20,6 +21,16 @@ interface AudioPolicy {
   name: string;
   englishOnly: boolean;
   normalizeAudio: boolean;
+}
+
+interface LiveTvSource {
+  liveTvSourceId: string;
+  name: string;
+  kind: string;
+  config: string;
+  enabled: boolean;
+  lastSyncedAt: string | null;
+  _count: { channels: number };
 }
 
 interface AdminData {
@@ -30,6 +41,7 @@ interface AdminData {
   users: any[];
   sessions: any[];
   predictions: any[];
+  liveTvSources: LiveTvSource[];
 }
 
 export default function Admin() {
@@ -48,11 +60,22 @@ export default function Admin() {
   const [editPolicyName, setEditPolicyName] = useState("");
   const [editPolicyEnglish, setEditPolicyEnglish] = useState(false);
   const [editPolicyNormalize, setEditPolicyNormalize] = useState(true);
+
+  const [liveTvSources, setLiveTvSources] = useState<LiveTvSource[]>([]);
+  const [showAddLiveTv, setShowAddLiveTv] = useState(false);
+  const [liveTvName, setLiveTvName] = useState("");
+  const [liveTvKind, setLiveTvKind] = useState<"m3u_url" | "m3u_file" | "xtream">("m3u_url");
+  const [liveTvM3uUrl, setLiveTvM3uUrl] = useState("");
+  const [liveTvM3uFile, setLiveTvM3uFile] = useState("");
+  const [liveTvBaseUrl, setLiveTvBaseUrl] = useState("");
+  const [liveTvUsername, setLiveTvUsername] = useState("");
+  const [liveTvPassword, setLiveTvPassword] = useState("");
+  const [liveTvOutput, setLiveTvOutput] = useState("m3u8");
   const [msg, setMsg] = useState("");
 
   async function load() {
     try {
-      const [health, libraries, jobs, nodes, users, sessions, predictions, scans, policies] =
+      const [health, libraries, jobs, nodes, users, sessions, predictions, scans, policies, liveTv] =
         await Promise.all([
           api("/health").catch(() => ({ status: "down" })),
           api("/libraries").catch(() => []),
@@ -63,6 +86,7 @@ export default function Admin() {
           api("/predictions").catch(() => []),
           api("/scan-jobs").catch(() => []),
           api<AudioPolicy[]>("/audio-policies").catch(() => []),
+          api<LiveTvSource[]>("/live-tv/sources").catch(() => []),
         ]);
       setData({
         health,
@@ -72,9 +96,11 @@ export default function Admin() {
         users,
         sessions,
         predictions,
+        liveTvSources: liveTv,
       });
       setScanJobs(scans);
       setAudioPolicies(policies);
+      setLiveTvSources(liveTv);
     } catch {
       // ignore
     }
@@ -113,6 +139,63 @@ export default function Admin() {
       setHnName("");
       setHnClass("");
       setHnPath("");
+      load();
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
+  async function createLiveTvSource() {
+    if (!liveTvName.trim()) return;
+    let config: Record<string, unknown> = {};
+    if (liveTvKind === "m3u_url") {
+      config = { url: liveTvM3uUrl };
+    } else if (liveTvKind === "m3u_file") {
+      config = { content: liveTvM3uFile };
+    } else {
+      config = {
+        baseUrl: liveTvBaseUrl,
+        username: liveTvUsername,
+        password: liveTvPassword,
+        output: liveTvOutput,
+      };
+    }
+    try {
+      const created = await api<LiveTvSource>("/live-tv/sources", {
+        method: "POST",
+        body: JSON.stringify({ name: liveTvName, kind: liveTvKind, config }),
+      });
+      await api(`/live-tv/sources/${created.liveTvSourceId}/sync`, { method: "POST" });
+      setMsg("Live TV source added and synced");
+      setLiveTvName("");
+      setLiveTvM3uUrl("");
+      setLiveTvM3uFile("");
+      setLiveTvBaseUrl("");
+      setLiveTvUsername("");
+      setLiveTvPassword("");
+      setLiveTvOutput("m3u8");
+      setShowAddLiveTv(false);
+      load();
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
+  async function syncLiveTvSource(id: string) {
+    setMsg("");
+    try {
+      await api(`/live-tv/sources/${id}/sync`, { method: "POST" });
+      setMsg("Live TV source synced");
+      load();
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
+  async function deleteLiveTvSource(id: string) {
+    if (!confirm("Delete this live TV source and all its channels?")) return;
+    try {
+      await api(`/live-tv/sources/${id}`, { method: "DELETE" });
       load();
     } catch (err: any) {
       setMsg(err.message);
@@ -488,6 +571,135 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {/* Live TV Sources */}
+      <div className="bg-gray-800 rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-white font-bold flex items-center gap-2">
+            <Radio className="w-5 h-5 text-amber-400" /> Live TV Sources
+          </h2>
+          <button
+            onClick={() => setShowAddLiveTv(!showAddLiveTv)}
+            className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition"
+          >
+            <Plus className="w-4 h-4" /> Add
+          </button>
+        </div>
+
+        {showAddLiveTv && (
+          <div className="bg-gray-700 rounded-lg p-4 mb-4 space-y-3">
+            <input
+              type="text"
+              placeholder="Source name"
+              value={liveTvName}
+              onChange={(e) => setLiveTvName(e.target.value)}
+              className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+            />
+            <select
+              value={liveTvKind}
+              onChange={(e) => setLiveTvKind(e.target.value as any)}
+              className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+            >
+              <option value="m3u_url">M3U URL</option>
+              <option value="m3u_file">M3U File contents</option>
+              <option value="xtream">Xtreme Codes</option>
+            </select>
+
+            {liveTvKind === "m3u_url" && (
+              <input
+                type="text"
+                placeholder="http://example.com/playlist.m3u"
+                value={liveTvM3uUrl}
+                onChange={(e) => setLiveTvM3uUrl(e.target.value)}
+                className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+              />
+            )}
+
+            {liveTvKind === "m3u_file" && (
+              <textarea
+                rows={4}
+                placeholder="#EXTM3U..."
+                value={liveTvM3uFile}
+                onChange={(e) => setLiveTvM3uFile(e.target.value)}
+                className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+              />
+            )}
+
+            {liveTvKind === "xtream" && (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Base URL (e.g. http://example.com:8080)"
+                  value={liveTvBaseUrl}
+                  onChange={(e) => setLiveTvBaseUrl(e.target.value)}
+                  className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={liveTvUsername}
+                  onChange={(e) => setLiveTvUsername(e.target.value)}
+                  className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={liveTvPassword}
+                  onChange={(e) => setLiveTvPassword(e.target.value)}
+                  className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+                />
+                <select
+                  value={liveTvOutput}
+                  onChange={(e) => setLiveTvOutput(e.target.value)}
+                  className="w-full bg-gray-600 text-white border border-gray-500 rounded px-3 py-2 text-sm"
+                >
+                  <option value="m3u8">HLS (.m3u8)</option>
+                  <option value="ts">MPEG-TS (.ts)</option>
+                </select>
+              </div>
+            )}
+
+            <button
+              onClick={createLiveTvSource}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm transition"
+            >
+              Save &amp; Sync
+            </button>
+          </div>
+        )}
+
+        {liveTvSources.length === 0 ? (
+          <p className="text-gray-500 text-sm">No live TV sources yet. Add an M3U or Xtreme Codes source to get started.</p>
+        ) : (
+          <div className="space-y-2">
+            {liveTvSources.map((s) => (
+              <div key={s.liveTvSourceId} className="flex items-center gap-3 bg-gray-700 rounded-lg p-3">
+                <Radio className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-white text-sm font-medium">{s.name}</p>
+                  <p className="text-gray-500 text-xs">
+                    {s.kind} · {s._count.channels} channels ·{" "}
+                    {s.enabled ? "Enabled" : "Disabled"}
+                    {s.lastSyncedAt && ` · Synced ${new Date(s.lastSyncedAt).toLocaleString()}`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => syncLiveTvSource(s.liveTvSourceId)}
+                  className="text-blue-400 hover:text-blue-300 text-sm"
+                >
+                  Sync
+                </button>
+                <button
+                  onClick={() => deleteLiveTvSource(s.liveTvSourceId)}
+                  className="text-red-400 hover:text-red-300"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import SettingsPage from "./pages/Settings";
 import Collections from "./pages/Collections";
 import Sessions from "./pages/Sessions";
 import EdgeNodes from "./pages/EdgeNodes";
+import LiveTv from "./pages/LiveTv";
 import { Film, Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -23,6 +24,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { to: "/", label: "Home", icon: <Home className="w-5 h-5" /> },
+    { to: "/live-tv", label: "Live TV", icon: <Radio className="w-5 h-5" /> },
     { to: "/search", label: "Search", icon: <SearchIcon className="w-5 h-5" /> },
     { to: "/collections", label: "Collections", icon: <Folder className="w-5 h-5" /> },
     { to: "/sessions", label: "Sessions", icon: <Radio className="w-5 h-5" /> },
@@ -205,6 +207,14 @@ export default function App() {
         element={
           <Protected>
             <Sessions />
+          </Protected>
+        }
+      />
+      <Route
+        path="/live-tv"
+        element={
+          <Protected>
+            <LiveTv />
           </Protected>
         }
       />

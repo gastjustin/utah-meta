@@ -1,0 +1,135 @@
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../api";
+import { Radio, Play } from "lucide-react";
+
+interface LiveTvChannel {
+  liveTvChannelId: string;
+  name: string;
+  logoUrl?: string;
+  groupName?: string;
+  streamUrl: string;
+}
+
+export default function LiveTv() {
+  const [channels, setChannels] = useState<LiveTvChannel[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [group, setGroup] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api<LiveTvChannel[]>("/live-tv/channels")
+      .then((data) => {
+        setChannels(data);
+        if (data.length > 0) setSelected(data[0].liveTvChannelId);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const groups = useMemo(() => {
+    const set = new Set<string>();
+    channels.forEach((c) => c.groupName && set.add(c.groupName));
+    return Array.from(set).sort();
+  }, [channels]);
+
+  const filtered = useMemo(() => {
+    return group
+      ? channels.filter((c) => c.groupName === group)
+      : channels;
+  }, [channels, group]);
+
+  const selectedChannel = useMemo(
+    () => channels.find((c) => c.liveTvChannelId === selected) || filtered[0],
+    [channels, selected, filtered]
+  );
+
+  if (loading) return <div className="text-gray-400 p-8">Loading live TV...</div>;
+
+  return (
+    <div className="p-6 md:p-8 space-y-6">
+      {error && (
+        <div className="bg-red-900/40 text-red-200 text-sm p-3 rounded">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Player */}
+        <div className="flex-1 space-y-4">
+          <div className="bg-black rounded-xl overflow-hidden aspect-video">
+            {selectedChannel ? (
+              <video
+                key={selectedChannel.liveTvChannelId}
+                src={`/live-tv/stream/${selectedChannel.liveTvChannelId}`}
+                controls
+                autoPlay
+                className="w-full h-full"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-gray-600">
+                <Radio className="w-16 h-16" />
+              </div>
+            )}
+          </div>
+          {selectedChannel && (
+            <div>
+              <h1 className="text-xl font-bold text-white">{selectedChannel.name}</h1>
+              <p className="text-gray-500 text-sm">{selectedChannel.groupName || "Live TV"}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Channel list */}
+        <div className="w-full lg:w-80 bg-gray-800 rounded-xl p-4 space-y-4">
+          <h2 className="text-white font-bold flex items-center gap-2">
+            <Radio className="w-5 h-5 text-amber-500" /> Channels
+          </h2>
+
+          {groups.length > 1 && (
+            <select
+              value={group || ""}
+              onChange={(e) => setGroup(e.target.value || null)}
+              className="w-full bg-gray-700 text-white border border-gray-600 rounded px-3 py-2 text-sm"
+            >
+              <option value="">All groups</option>
+              {groups.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="space-y-1 max-h-[400px] overflow-y-auto">
+            {filtered.map((c) => (
+              <button
+                key={c.liveTvChannelId}
+                onClick={() => setSelected(c.liveTvChannelId)}
+                className={`w-full flex items-center gap-3 p-2 rounded text-left transition ${
+                  selected === c.liveTvChannelId
+                    ? "bg-amber-900/40 text-amber-100"
+                    : "hover:bg-gray-700 text-gray-300"
+                }`}
+              >
+                {c.logoUrl ? (
+                  <img
+                    src={c.logoUrl}
+                    alt=""
+                    className="w-8 h-8 object-contain rounded bg-white/5"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded bg-gray-700 flex items-center justify-center text-gray-500">
+                    <Play className="w-4 h-4" />
+                  </div>
+                )}
+                <span className="text-sm truncate">{c.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
