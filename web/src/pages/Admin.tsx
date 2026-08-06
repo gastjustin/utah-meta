@@ -195,8 +195,13 @@ export default function Admin() {
   async function syncVodSource(id: string) {
     setMsg("");
     try {
-      await api(`/live-tv/sources/${id}/sync-vod`, { method: "POST" });
-      setMsg("VOD sync completed");
+      const result = await api<{ movies: number; series: number; episodes: number }>(
+        `/live-tv/sources/${id}/sync-vod`,
+        { method: "POST" }
+      );
+      setMsg(
+        `VOD sync completed: ${result.movies} movies, ${result.series} series, ${result.episodes} episodes`
+      );
       load();
     } catch (err: any) {
       setMsg(err.message);
