@@ -49,7 +49,11 @@ app.get("/artwork/:id", async (req, res) => {
   });
   if (!artwork) return res.status(404).end();
   const path = artwork.storageUri;
-  if (!path || !existsSync(path)) return res.status(404).end();
+  if (!path) return res.status(404).end();
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return res.redirect(path);
+  }
+  if (!existsSync(path)) return res.status(404).end();
   const ext = path.split(".").pop()?.toLowerCase() || "jpg";
   res.setHeader("Content-Type", ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
   res.setHeader("Cache-Control", "public, max-age=86400");

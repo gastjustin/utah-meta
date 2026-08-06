@@ -59,30 +59,43 @@ interface XtreamSeriesInfoResponse {
 
 export { parseM3U, fetchM3UFromURL, XtreamConfig };
 
-export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVodMovie[]> {
+interface XtreamVodCategory {
+  category_id: string;
+  category_name: string;
+}
+
+async function fetchVodCategories(cfg: XtreamConfig): Promise<XtreamVodCategory[]> {
   const base = cfg.baseUrl.replace(/\/$/, "");
   const apiPath = cfg.apiPath?.replace(/^\//, "") || "player_api.php";
-
   const url = `${base}/${apiPath}?${new URLSearchParams({
     username: cfg.username,
     password: cfg.password,
-    action: "get_vod_streams",
+    action: "get_vod_categories",
   }).toString()}`;
+  const res = await fetchWithTimeout(url, { redirect: "follow" }, 30000);
+  if (!res.ok) return [];
+  return (await res.json()) as XtreamVodCategory[];
+}
 
+async function fetchVodStreamsForCategory(
+  cfg: XtreamConfig,
+  categoryId?: string
+): Promise<ParsedVodMovie[]> {
+  const base = cfg.baseUrl.replace(/\/$/, "");
+  const apiPath = cfg.apiPath?.replace(/^\//, "") || "player_api.php";
+  const params: Record<string, string> = {
+    username: cfg.username,
+    password: cfg.password,
+    action: "get_vod_streams",
+  };
+  if (categoryId) params.category_id = categoryId;
+
+  const url = `${base}/${apiPath}?${new URLSearchParams(params).toString()}`;
   console.log(`[vod] fetching Xtream VOD streams from ${url}`);
-  let res;
-  try {
-    res = await fetchWithTimeout(url, { redirect: "follow" }, 60000);
-  } catch (err: any) {
-    const cause = err.cause ? ` (${err.cause.message || err.cause})` : "";
-    throw new Error(`VOD fetch failed for ${url}: ${err.message}${cause}`);
-  }
-  if (!res.ok) {
-    throw new Error(`Xtream VOD request failed: ${res.status} ${res.statusText} at ${url}`);
-  }
+  const res = await fetchWithTimeout(url, { redirect: "follow" }, 60000);
+  if (!res.ok) return [];
   const data = (await res.json()) as XtreamVodStream[];
-  console.log(`[vod] received ${data.length} VOD streams`);
-
+  console.log(`[vod] received ${data.length} VOD streams from ${url}`);
   return data.map((stream) => {
     const streamId = String(stream.stream_id);
     const ext = stream.container_extension || "mp4";
@@ -103,6 +116,25 @@ export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVo
       container: ext,
     };
   });
+}
+
+export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVodMovie[]> {
+  const defaultStreams = await fetchVodStreamsForCategory(cfg);
+  if (defaultStreams.length > 0) return defaultStreams;
+
+  console.log("[vod] default get_vod_streams returned 0, trying categories");
+  const categories = await fetchVodCategories(cfg);
+  const byId = new Map<string, ParsedVodMovie>();
+  for (const cat of categories) {
+    console.log(`[vod] fetching VOD category ${cat.category_name}`);
+    const streams = await fetchVodStreamsForCategory(cfg, cat.category_id);
+    for (const m of streams) {
+      if (!byId.has(m.id)) byId.set(m.id, m);
+    }
+  }
+  const result = Array.from(byId.values());
+  console.log(`[vod] total ${result.length} VOD streams from ${categories.length} categories`);
+  return result;
 }
 
 export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries[]> {
