@@ -75,6 +75,8 @@ model MediaItem {
   releaseYear       Int?     @map("release_year")
   overview          String?  @map("overview")
   canonicalMetadataId String? @map("canonical_metadata_id")
+  streamUrl         String?  @map("stream_url") // for M3U / Xtreme VOD
+  source            String?  @map("source") // e.g. "iptv_vod:<sourceId>"
 
   library      Library        @relation(fields: [libraryId], references: [libraryId])
   season       Season?        @relation(fields: [seasonId], references: [seasonId])
@@ -88,6 +90,7 @@ model MediaItem {
   preparationJobs PreparationJob[]
 
   @@index([libraryId])
+  @@index([source])
   @@map("media_item")
 }
 

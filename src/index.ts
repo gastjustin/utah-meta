@@ -21,6 +21,7 @@ import { libraryRouter } from "./library-routes";
 import { userRouter } from "./user-routes";
 import { liveTvRouter } from "./live-tv-routes";
 import { serveLiveTvStream } from "./live-tv-stream";
+import { serveVodStream } from "./vod-stream";
 import { startPrepWorker } from "./preparation-engine";
 import { authRouter, requireAuth, requireAdmin } from "./auth";
 import { prisma } from "./db";
@@ -85,8 +86,12 @@ app.get("/stream/:sessionId", async (req, res) => {
   }
 });
 
+// Public live TV / VOD stream proxies — served here so upstream credentials stay hidden.
+app.get("/live-tv/stream/:id", (req, res) => serveLiveTvStream(req, res).catch((err) => console.error(err)));
+app.get("/vod/stream/:id", (req, res) => serveVodStream(req, res).catch((err) => console.error(err)));
+
 // SPA fallback: any non-API GET returns index.html so React Router handles it.
-app.get(/^(?!\/(auth|health|libraries|series|items|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|person-photo|continue-watching|audio-policies|health-snapshots|collections|scan-jobs|live-tv)).*/, (_req, res) => {
+app.get(/^(?!\/(auth|health|libraries|series|items|media|search|users|devices|sessions|stream|play|preparation|predictions|home-nodes|download|library|artwork|person-photo|continue-watching|audio-policies|health-snapshots|collections|scan-jobs|live-tv|vod)).*/, (_req, res) => {
   res.sendFile(join(__dirname, "..", "public", "dist", "index.html"), (err) => {
     if (err) res.sendFile(join(__dirname, "..", "public", "index.html"));
   });

@@ -39,6 +39,7 @@ interface MediaDetail {
   releaseYear?: number;
   runtimeMs?: number;
   episodeNumber?: number | null;
+  streamUrl?: string | null;
   fileAssets: { fileAssetId: string; sourcePath: string }[];
   artworkAssets: { artworkAssetId: string; kind: string }[];
   mediaGenres: { genre: { name: string } }[];
@@ -170,8 +171,18 @@ export default function MediaDetail() {
   }, []);
 
   async function handlePlay() {
-    if (!item?.fileAssets?.length) return;
+    if (!item) return;
     setError("");
+
+    if (item.streamUrl) {
+      setStreamUrl(`/vod/stream/${item.mediaItemId}`);
+      setSessionId(item.mediaItemId);
+      setTracks({ audio: [], subtitle: [] });
+      setPlaying(true);
+      return;
+    }
+
+    if (!item.fileAssets?.length) return;
     try {
       const res = await api<PlayResponse>("/play", {
         method: "POST",
@@ -470,7 +481,7 @@ export default function MediaDetail() {
 
                 {/* Primary actions */}
                 <div className="flex items-center gap-3 flex-wrap mb-4">
-                  {item.fileAssets?.length > 0 && (
+                  {(item.fileAssets?.length > 0 || item.streamUrl) && (
                     <button
                       onClick={handlePlay}
                       className="inline-flex items-center gap-2 bg-white hover:bg-white/90 text-black font-semibold px-6 py-2.5 rounded-full transition text-sm"

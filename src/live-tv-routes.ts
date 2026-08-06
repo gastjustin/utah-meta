@@ -137,4 +137,18 @@ liveTvRouter.get("/live-tv/channels/:id", async (req: Request, res: Response) =>
   res.json(channel);
 });
 
+liveTvRouter.post("/live-tv/sources/:id/sync-vod", async (req: Request, res: Response) => {
+  const source = await prisma.liveTvSource.findUnique({
+    where: { liveTvSourceId: req.params.id },
+  });
+  if (!source) return res.status(404).json({ error: "Source not found" });
+  try {
+    const { syncVodFromSource } = await import("./vod-sync");
+    const result = await syncVodFromSource(source.liveTvSourceId, { kind: source.kind, config: source.config });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stream endpoint is public and served from src/index.ts

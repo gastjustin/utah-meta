@@ -192,6 +192,17 @@ export default function Admin() {
     }
   }
 
+  async function syncVodSource(id: string) {
+    setMsg("");
+    try {
+      await api(`/live-tv/sources/${id}/sync-vod`, { method: "POST" });
+      setMsg("VOD sync completed");
+      load();
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
   async function deleteLiveTvSource(id: string) {
     if (!confirm("Delete this live TV source and all its channels?")) return;
     try {
@@ -688,6 +699,12 @@ export default function Admin() {
                   className="text-blue-400 hover:text-blue-300 text-sm"
                 >
                   Sync
+                </button>
+                <button
+                  onClick={() => syncVodSource(s.liveTvSourceId)}
+                  className="text-amber-400 hover:text-amber-300 text-sm"
+                >
+                  Sync VOD
                 </button>
                 <button
                   onClick={() => deleteLiveTvSource(s.liveTvSourceId)}
