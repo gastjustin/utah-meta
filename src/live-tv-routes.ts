@@ -8,7 +8,7 @@
 
 import { Router, Request, Response } from "express";
 import { prisma } from "./db";
-import { parseM3U, fetchM3UFromURL, fetchXtreamChannels, XtreamConfig } from "./live-tv-parser";
+import { parseM3U, fetchM3UFromURL, fetchXtreamChannels, fetchWithTimeout, XtreamConfig } from "./live-tv-parser";
 
 export const liveTvRouter = Router();
 
@@ -135,6 +135,53 @@ liveTvRouter.get("/live-tv/channels/:id", async (req: Request, res: Response) =>
   });
   if (!channel) return res.status(404).json({ error: "Channel not found" });
   res.json(channel);
+});
+
+liveTvRouter.get("/live-tv/channels/:id/epg", async (req: Request, res: Response) => {
+  const channel = await prisma.liveTvChannel.findUnique({
+    where: { liveTvChannelId: req.params.id },
+    include: { liveTvSource: true },
+  });
+  if (!channel || !channel.liveTvSource?.enabled) {
+    return res.status(404).json({ error: "Channel not found or source disabled" });
+  }
+  if (channel.liveTvSource.kind !== "xtream") {
+    return res.status(501).json({ error: "EPG is only supported for Xtream sources" });
+  }
+
+  const cfg = JSON.parse(channel.liveTvSource.config) as XtreamConfig;
+  const streamId =
+    channel.streamUrl.match(/\/(\d+)\.[^/.]+$/)?.[1] || channel.epgId;
+  if (!streamId) {
+    return res.status(404).json({ error: "Could not determine stream id for EPG" });
+  }
+
+  const base = cfg.baseUrl.replace(/\/$/, "");
+  const apiPath = cfg.apiPath?.replace(/^\//, "") || "player_api.php";
+  const url = `${base}/${apiPath}?${new URLSearchParams({
+    username: cfg.username,
+    password: cfg.password,
+    action: "get_short_epg",
+    stream_id: streamId,
+  }).toString()}`;
+
+  try {
+    const epgRes = await fetchWithTimeout(url, { redirect: "follow" }, 30000);
+    if (!epgRes.ok) {
+      return res.status(502).json({ error: `EPG fetch failed: ${epgRes.status} ${epgRes.statusText}` });
+    }
+    const data = (await epgRes.json()) as { epg_listings?: any[] };
+    const listings = (data?.epg_listings || []).map((p: any) => ({
+      title: p.title || p.name || "Unknown",
+      description: p.description || p.desc || "",
+      start: p.start || p.start_timestamp || null,
+      end: p.end || p.stop_timestamp || p.stop || null,
+    }));
+    res.json(listings);
+  } catch (err: any) {
+    console.error(`[live-tv] EPG fetch failed for channel ${req.params.id}:`, err);
+    res.status(502).json({ error: err.message || "EPG fetch failed" });
+  }
 });
 
 liveTvRouter.post("/live-tv/sources/:id/sync-vod", async (req: Request, res: Response) => {

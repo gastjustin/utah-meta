@@ -11,12 +11,21 @@ interface LiveTvChannel {
   streamUrl: string;
 }
 
+interface EpgListing {
+  title: string;
+  description: string;
+  start: string | number | null;
+  end: string | number | null;
+}
+
 export default function LiveTv() {
   const [channels, setChannels] = useState<LiveTvChannel[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [group, setGroup] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [epg, setEpg] = useState<EpgListing[]>([]);
+  const [epgLoading, setEpgLoading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -72,6 +81,18 @@ export default function LiveTv() {
     };
   }, [selectedChannel]);
 
+  useEffect(() => {
+    if (!selectedChannel) {
+      setEpg([]);
+      return;
+    }
+    setEpgLoading(true);
+    api<EpgListing[]>(`/live-tv/channels/${selectedChannel.liveTvChannelId}/epg`)
+      .then((data) => setEpg(data || []))
+      .catch(() => setEpg([]))
+      .finally(() => setEpgLoading(false));
+  }, [selectedChannel]);
+
   if (loading) return <div className="text-gray-400 p-8">Loading live TV...</div>;
 
   return (
@@ -103,6 +124,37 @@ export default function LiveTv() {
             <div>
               <h1 className="text-xl font-bold text-white">{selectedChannel.name}</h1>
               <p className="text-gray-500 text-sm">{selectedChannel.groupName || "Live TV"}</p>
+            </div>
+          )}
+
+          {/* EPG guide */}
+          {selectedChannel && (
+            <div className="bg-[#0a0a0a] rounded-xl p-4 space-y-3">
+              <h3 className="text-white font-bold text-sm">Channel Guide</h3>
+              {epgLoading ? (
+                <p className="text-gray-500 text-sm">Loading guide...</p>
+              ) : epg.length === 0 ? (
+                <p className="text-gray-500 text-sm">No guide data available.</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {epg.map((p, i) => (
+                    <div
+                      key={i}
+                      className="flex gap-3 text-sm border-b border-white/5 last:border-0 pb-2 last:pb-0"
+                    >
+                      <div className="text-amber-500 font-medium whitespace-nowrap w-24 shrink-0">
+                        {formatEpgTime(p.start)} - {formatEpgTime(p.end)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-medium truncate">{p.title}</p>
+                        {p.description && (
+                          <p className="text-gray-500 text-xs truncate">{p.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -159,4 +211,25 @@ export default function LiveTv() {
       </div>
     </div>
   );
+}
+
+function formatEpgTime(value: string | number | null): string {
+  if (!value) return "--";
+  if (typeof value === "number") {
+    const d = new Date(value * 1000);
+    return isNaN(d.getTime()) ? "--" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  const numeric = parseInt(value, 10);
+  if (!isNaN(numeric) && value.length === 10) {
+    const d = new Date(numeric * 1000);
+    if (!isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  const xmltv = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  if (xmltv) {
+    const [, y, mo, d, h, m] = xmltv;
+    const date = new Date(Date.UTC(+y, +mo - 1, +d, +h, +m));
+    return isNaN(date.getTime()) ? "--" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? value : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
