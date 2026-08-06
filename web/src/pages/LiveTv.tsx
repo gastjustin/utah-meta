@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Radio, Play } from "lucide-react";
+import Hls from "hls.js";
 
 interface LiveTvChannel {
   liveTvChannelId: string;
@@ -16,16 +17,8 @@ export default function LiveTv() {
   const [group, setGroup] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api<LiveTvChannel[]>("/live-tv/channels")
-      .then((data) => {
-        setChannels(data);
-        if (data.length > 0) setSelected(data[0].liveTvChannelId);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   const groups = useMemo(() => {
     const set = new Set<string>();
@@ -44,6 +37,41 @@ export default function LiveTv() {
     [channels, selected, filtered]
   );
 
+  useEffect(() => {
+    api<LiveTvChannel[]>("/live-tv/channels")
+      .then((data) => {
+        setChannels(data);
+        if (data.length > 0) setSelected(data[0].liveTvChannelId);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedChannel || !videoRef.current) return;
+    const v = videoRef.current;
+    const src = `/live-tv/stream/${selectedChannel.liveTvChannelId}`;
+
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hlsRef.current = hls;
+      hls.loadSource(src);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+    } else {
+      v.src = src;
+      v.play().catch(() => {});
+    }
+
+    return () => {
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+    };
+  }, [selectedChannel]);
+
   if (loading) return <div className="text-gray-400 p-8">Loading live TV...</div>;
 
   return (
@@ -60,8 +88,7 @@ export default function LiveTv() {
           <div className="bg-black rounded-xl overflow-hidden aspect-video">
             {selectedChannel ? (
               <video
-                key={selectedChannel.liveTvChannelId}
-                src={`/live-tv/stream/${selectedChannel.liveTvChannelId}`}
+                ref={videoRef}
                 controls
                 autoPlay
                 className="w-full h-full"
