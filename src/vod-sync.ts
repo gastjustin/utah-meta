@@ -108,7 +108,11 @@ export async function syncVodFromSource(
   }
   console.log(`[vod-sync] ${result.movies} movies imported`);
 
-  for (const s of seriesList) {
+  for (let i = 0; i < seriesList.length; i++) {
+    const s = seriesList[i];
+    if (i % 10 === 0) {
+      console.log(`[vod-sync] importing series ${i + 1}/${seriesList.length}: ${s.title}`);
+    }
     const existingSeries = await prisma.series.findFirst({
       where: { libraryId: library.libraryId, title: s.title },
       select: { seriesId: true },

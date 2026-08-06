@@ -81,6 +81,7 @@ export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVo
     throw new Error(`Xtream VOD request failed: ${res.status} ${res.statusText} at ${url}`);
   }
   const data = (await res.json()) as XtreamVodStream[];
+  console.log(`[vod] received ${data.length} VOD streams`);
 
   return data.map((stream) => {
     const streamId = String(stream.stream_id);
@@ -120,9 +121,11 @@ export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries
     throw new Error(`Xtream series request failed: ${res.status} ${res.statusText} at ${url}`);
   }
   const list = (await res.json()) as any[];
+  console.log(`[vod] received ${list.length} series`);
 
   const result: XtreamSeries[] = [];
-  for (const s of list) {
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
     const seriesId = String(s.series_id);
     const infoUrl = `${base}/${apiPath}?${new URLSearchParams({
       username: cfg.username,
@@ -130,6 +133,9 @@ export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries
       action: "get_series_info",
       series_id: seriesId,
     }).toString()}`;
+    if (i % 10 === 0) {
+      console.log(`[vod] fetching series info ${i + 1}/${list.length}: ${s.name || seriesId}`);
+    }
     let infoRes;
     try {
       infoRes = await fetchWithTimeout(infoUrl, { redirect: "follow" }, 30000);
