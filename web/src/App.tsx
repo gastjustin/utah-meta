@@ -13,7 +13,8 @@ import Collections from "./pages/Collections";
 import Sessions from "./pages/Sessions";
 import EdgeNodes from "./pages/EdgeNodes";
 import LiveTv from "./pages/LiveTv";
-import { Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight } from "lucide-react";
+import Browse from "./pages/Browse";
+import { Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight, Film, Tv as TvIcon } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -24,6 +25,8 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { to: "/", label: "Home", icon: <Home className="w-5 h-5" /> },
+    { to: "/movies", label: "Movies", icon: <Film className="w-5 h-5" /> },
+    { to: "/tv", label: "TV Series", icon: <TvIcon className="w-5 h-5" /> },
     { to: "/live-tv", label: "Live TV", icon: <Radio className="w-5 h-5" /> },
     { to: "/search", label: "Search", icon: <SearchIcon className="w-5 h-5" /> },
     { to: "/collections", label: "Collections", icon: <Folder className="w-5 h-5" /> },
@@ -167,6 +170,22 @@ export default function App() {
         element={
           <Protected>
             <Library />
+          </Protected>
+        }
+      />
+      <Route
+        path="/movies"
+        element={
+          <Protected>
+            <Browse kind="movies" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/tv"
+        element={
+          <Protected>
+            <Browse kind="series" />
           </Protected>
         }
       />
