@@ -69,9 +69,15 @@ export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVo
     action: "get_vod_streams",
   }).toString()}`;
 
-  const res = await fetch(url, { redirect: "follow" });
+  let res;
+  try {
+    res = await fetch(url, { redirect: "follow" });
+  } catch (err: any) {
+    const cause = err.cause ? ` (${err.cause.message || err.cause})` : "";
+    throw new Error(`VOD fetch failed for ${url}: ${err.message}${cause}`);
+  }
   if (!res.ok) {
-    throw new Error(`Xtream VOD request failed: ${res.status} ${res.statusText}`);
+    throw new Error(`Xtream VOD request failed: ${res.status} ${res.statusText} at ${url}`);
   }
   const data = (await res.json()) as XtreamVodStream[];
 
@@ -116,15 +122,18 @@ export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries
   const result: XtreamSeries[] = [];
   for (const s of list) {
     const seriesId = String(s.series_id);
-    const infoRes = await fetch(
-      `${base}/${apiPath}?${new URLSearchParams({
-        username: cfg.username,
-        password: cfg.password,
-        action: "get_series_info",
-        series_id: seriesId,
-      }).toString()}`,
-      { redirect: "follow" }
-    );
+    const infoUrl = `${base}/${apiPath}?${new URLSearchParams({
+      username: cfg.username,
+      password: cfg.password,
+      action: "get_series_info",
+      series_id: seriesId,
+    }).toString()}`;
+    let infoRes;
+    try {
+      infoRes = await fetch(infoUrl, { redirect: "follow" });
+    } catch {
+      continue;
+    }
     if (!infoRes.ok) continue;
 
     const info = (await infoRes.json()) as XtreamSeriesInfoResponse;

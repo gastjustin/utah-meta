@@ -147,6 +147,7 @@ liveTvRouter.post("/live-tv/sources/:id/sync-vod", async (req: Request, res: Res
     const result = await syncVodFromSource(source.liveTvSourceId, { kind: source.kind, config: source.config });
     res.json(result);
   } catch (err: any) {
+    console.error("VOD sync failed for source", req.params.id, err);
     res.status(500).json({ error: err.message });
   }
 });
