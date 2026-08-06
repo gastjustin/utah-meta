@@ -21,6 +21,7 @@ export async function syncVodFromSource(
   sourceId: string,
   sourceConfig: { kind: string; config: string }
 ): Promise<SyncVodResult> {
+  console.log(`[vod-sync] starting sync for source ${sourceId} (${sourceConfig.kind})`);
   const library = await findOrCreateVodLibrary();
   const source = sourcePrefix(sourceId);
 
@@ -55,6 +56,7 @@ export async function syncVodFromSource(
     seriesList = await fetchXtreamSeries(cfg);
   }
 
+  console.log(`[vod-sync] importing ${movies.length} movies and ${seriesList.length} series`);
   const result: SyncVodResult = { movies: 0, series: 0, episodes: 0 };
   const provider = `iptv_vod:${sourceId}`;
 
@@ -104,6 +106,7 @@ export async function syncVodFromSource(
     });
     result.movies++;
   }
+  console.log(`[vod-sync] ${result.movies} movies imported`);
 
   for (const s of seriesList) {
     const existingSeries = await prisma.series.findFirst({
@@ -194,6 +197,7 @@ export async function syncVodFromSource(
     }
   }
 
+  console.log(`[vod-sync] done: ${result.movies} movies, ${result.series} series, ${result.episodes} episodes`);
   return result;
 }
 

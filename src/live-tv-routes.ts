@@ -142,6 +142,7 @@ liveTvRouter.post("/live-tv/sources/:id/sync-vod", async (req: Request, res: Res
     where: { liveTvSourceId: req.params.id },
   });
   if (!source) return res.status(404).json({ error: "Source not found" });
+  console.log(`[vod] starting sync-vod for source ${req.params.id}`);
   try {
     const { syncVodFromSource } = await import("./vod-sync");
     const result = await syncVodFromSource(source.liveTvSourceId, { kind: source.kind, config: source.config });

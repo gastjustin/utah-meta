@@ -98,8 +98,29 @@ export async function parseM3U(content: string): Promise<ParsedChannel[]> {
   return channels;
 }
 
+export async function fetchWithTimeout(
+  url: string,
+  options?: RequestInit,
+  ms = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error(`Request timed out after ${ms}ms: ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchM3UFromURL(url: string): Promise<ParsedChannel[]> {
-  const res = await fetch(url, { redirect: "follow" });
+  console.log(`[live-tv] fetching M3U from ${url}`);
+  const res = await fetchWithTimeout(url, { redirect: "follow" });
   if (!res.ok) {
     throw new Error(`Failed to fetch M3U: ${res.status} ${res.statusText}`);
   }
@@ -119,13 +140,14 @@ export async function fetchXtreamChannels(cfg: XtreamConfig): Promise<ParsedChan
   });
 
   const url = `${base}/${apiPath}?${authQs.toString()}`;
-  const res = await fetch(url, { redirect: "follow" });
+  console.log(`[live-tv] fetching Xtream live streams from ${url}`);
+  const res = await fetchWithTimeout(url, { redirect: "follow" });
   if (!res.ok) {
     throw new Error(`Xtream streams request failed: ${res.status} ${res.statusText}`);
   }
   const data = (await res.json()) as any[];
 
-  const categoriesRes = await fetch(
+  const categoriesRes = await fetchWithTimeout(
     `${base}/${apiPath}?${new URLSearchParams({
       username: cfg.username,
       password: cfg.password,

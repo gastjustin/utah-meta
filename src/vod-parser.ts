@@ -3,7 +3,7 @@
  * Parses M3U VOD playlists and fetches Xtreme Codes VOD/series streams.
  */
 
-import { parseM3U, fetchM3UFromURL, XtreamConfig } from "./live-tv-parser";
+import { parseM3U, fetchM3UFromURL, fetchWithTimeout, XtreamConfig } from "./live-tv-parser";
 
 export interface ParsedVodMovie {
   id: string;
@@ -69,9 +69,10 @@ export async function fetchXtreamVodStreams(cfg: XtreamConfig): Promise<ParsedVo
     action: "get_vod_streams",
   }).toString()}`;
 
+  console.log(`[vod] fetching Xtream VOD streams from ${url}`);
   let res;
   try {
-    res = await fetch(url, { redirect: "follow" });
+    res = await fetchWithTimeout(url, { redirect: "follow" }, 60000);
   } catch (err: any) {
     const cause = err.cause ? ` (${err.cause.message || err.cause})` : "";
     throw new Error(`VOD fetch failed for ${url}: ${err.message}${cause}`);
@@ -113,9 +114,10 @@ export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries
     action: "get_series",
   }).toString()}`;
 
-  const res = await fetch(url, { redirect: "follow" });
+  console.log(`[vod] fetching Xtream series list from ${url}`);
+  const res = await fetchWithTimeout(url, { redirect: "follow" }, 60000);
   if (!res.ok) {
-    throw new Error(`Xtream series request failed: ${res.status} ${res.statusText}`);
+    throw new Error(`Xtream series request failed: ${res.status} ${res.statusText} at ${url}`);
   }
   const list = (await res.json()) as any[];
 
@@ -130,7 +132,7 @@ export async function fetchXtreamSeries(cfg: XtreamConfig): Promise<XtreamSeries
     }).toString()}`;
     let infoRes;
     try {
-      infoRes = await fetch(infoUrl, { redirect: "follow" });
+      infoRes = await fetchWithTimeout(infoUrl, { redirect: "follow" }, 30000);
     } catch {
       continue;
     }
