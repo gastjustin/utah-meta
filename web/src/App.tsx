@@ -13,7 +13,7 @@ import Collections from "./pages/Collections";
 import Sessions from "./pages/Sessions";
 import EdgeNodes from "./pages/EdgeNodes";
 import LiveTv from "./pages/LiveTv";
-import { Film, Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight } from "lucide-react";
+import { Home, Settings, LogOut, Users as UsersIcon, Search as SearchIcon, Folder, Radio, Server, Sliders, Menu, X, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -67,7 +67,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-60 bg-[#0a0a0a] border-r border-white/5 fixed h-full z-40">
         <div className="flex items-center gap-2.5 px-5 py-5">
-          <Film className="w-7 h-7 text-amber-500" />
+          <img src="/littleLogo.jpeg" alt="UtahMeta" className="h-7 w-auto" />
           <span className="text-xl font-bold tracking-tight">UtahMeta</span>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-4">
@@ -99,7 +99,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 bg-[#0a0a0a] border-b border-white/5 px-4 py-3 flex items-center justify-between z-50">
         <div className="flex items-center gap-2">
-          <Film className="w-6 h-6 text-amber-500" />
+          <img src="/littleLogo.jpeg" alt="UtahMeta" className="h-6 w-auto" />
           <span className="font-bold">UtahMeta</span>
         </div>
         <button

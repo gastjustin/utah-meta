@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { login } from "../api";
-import { Film, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 
 export default function Login() {
   const [authSubject, setAuthSubject] = useState("");
@@ -22,8 +22,11 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0b]">
       <div className="w-full max-w-md px-6">
         <div className="flex flex-col items-center mb-8">
-          <Film className="w-12 h-12 text-amber-500 mb-3" />
-          <h1 className="text-3xl font-bold text-white tracking-tight">UtahMeta</h1>
+          <img
+            src="/littleLogo.jpeg"
+            alt="UtahMeta"
+            className="w-40 h-auto mb-4"
+          />
           <p className="text-gray-500 text-sm mt-2">Sign in to browse and watch your media</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
